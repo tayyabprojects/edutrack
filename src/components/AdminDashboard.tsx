@@ -26,8 +26,24 @@ export default function AdminDashboard({ currentLang, onToggleLang, onLogout }: 
   const basePrefix = import.meta.env.BASE_URL || './';
   const cleanBase = basePrefix.endsWith('/') ? basePrefix : basePrefix + '/';
 
+  const getDynamicImagePath = (filename: string) => {
+    try {
+      const hostname = window.location.hostname;
+      const pathname = window.location.pathname;
+      if (hostname.endsWith('github.io')) {
+        const parts = pathname.split('/').filter(Boolean);
+        if (parts.length > 0) {
+          const repoName = parts[0];
+          return `/${repoName}/${filename}`;
+        }
+      }
+    } catch (e) {}
+    return `/${filename}`;
+  };
+
   const imageSources = [
     tayyabPortrait,
+    getDynamicImagePath('tayyab_real_final_beauty.png'),
     'tayyab_real_final_beauty.png',
     `${cleanBase}tayyab_real_final_beauty.png`,
     '/tayyab_real_final_beauty.png',
