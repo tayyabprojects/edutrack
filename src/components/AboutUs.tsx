@@ -20,15 +20,32 @@ export default function AboutUs({ currentLang, onBack }: AboutUsProps) {
   const basePrefix = import.meta.env.BASE_URL || './';
   const cleanBase = basePrefix.endsWith('/') ? basePrefix : basePrefix + '/';
 
+  // Resolves the image path correctly, taking GitHub Pages subpaths into account.
+  const resolveImagePath = (filename: string) => {
+    const cleanFilename = filename.startsWith('/') ? filename.slice(1) : filename;
+    try {
+      const hostname = window.location.hostname;
+      const pathname = window.location.pathname;
+      if (hostname.endsWith('github.io')) {
+        const parts = pathname.split('/').filter(Boolean);
+        if (parts.length > 0) {
+          const repoName = parts[0];
+          return `/${repoName}/${cleanFilename}`;
+        }
+      }
+    } catch (e) {}
+    return `/${cleanFilename}`;
+  };
+
   const imageSources = [
-    `/tayyab_real_final_beauty.png?v=beauty4`,
-    tayyabPortrait ? `${tayyabPortrait}?v=beauty4` : '',
-    './tayyab_real_final_beauty.png?v=beauty4',
-    'tayyab_real_final_beauty.png?v=beauty4',
-    `${cleanBase}tayyab_real_final_beauty.png?v=beauty4`,
-    '/muhammad_tayyab_1779779674101_1779781067546.png?v=alt1',
+    resolveImagePath('tayyab_real_final_beauty.png') + '?v=beauty5',
+    tayyabPortrait ? `${tayyabPortrait}?v=beauty5` : '',
+    './tayyab_real_final_beauty.png?v=beauty5',
+    'tayyab_real_final_beauty.png?v=beauty5',
+    `${cleanBase}tayyab_real_final_beauty.png?v=beauty5`,
+    resolveImagePath('muhammad_tayyab_1779779674101_1779781067546.png') + '?v=alt1',
     tayyabAlt1 ? `${tayyabAlt1}?v=alt1` : '',
-    '/muhammad_tayyab_1779779674101.png?v=alt2',
+    resolveImagePath('muhammad_tayyab_1779779674101.png') + '?v=alt2',
     tayyabAlt2 ? `${tayyabAlt2}?v=alt2` : '',
   ].filter(Boolean) as string[];
 
