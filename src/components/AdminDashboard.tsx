@@ -29,17 +29,15 @@ export default function AdminDashboard({ currentLang, onToggleLang, onLogout }: 
   const cleanBase = basePrefix.endsWith('/') ? basePrefix : basePrefix + '/';
 
   const imageSources = [
-    '/muhammad_tayyab_1779779674101_1779781067546.png',
-    tayyabAlt1,
-    '/muhammad_tayyab_1779779674101.png',
-    tayyabAlt2,
-    '/tayyab_real_final_beauty.png',
-    tayyabPortrait,
-    './muhammad_tayyab_1779779674101_1779781067546.png',
-    './tayyab_real_final_beauty.png',
-    'tayyab_real_final_beauty.png',
-    `${cleanBase}tayyab_real_final_beauty.png`,
-    `${cleanBase}muhammad_tayyab_1779779674101_1779781067546.png`,
+    `/tayyab_real_final_beauty.png?v=beauty4`,
+    tayyabPortrait ? `${tayyabPortrait}?v=beauty4` : '',
+    './tayyab_real_final_beauty.png?v=beauty4',
+    'tayyab_real_final_beauty.png?v=beauty4',
+    `${cleanBase}tayyab_real_final_beauty.png?v=beauty4`,
+    '/muhammad_tayyab_1779779674101_1779781067546.png?v=alt1',
+    tayyabAlt1 ? `${tayyabAlt1}?v=alt1` : '',
+    '/muhammad_tayyab_1779779674101.png?v=alt2',
+    tayyabAlt2 ? `${tayyabAlt2}?v=alt2` : '',
   ].filter(Boolean) as string[];
 
   const [imgSrc, setImgSrc] = useState<string>(imageSources[0]);
