@@ -114,7 +114,7 @@ export default function LandingPage({ currentLang, onToggleLang, onOpenAuth }: L
             </div>
 
             {/* Desktop Navigation */}
-            <div className="hidden md:flex items-center space-x-8 space-x-reverse">
+            <div className="hidden md:flex items-center gap-8 lg:gap-10">
               <a 
                 href="#features" 
                 onClick={() => setActiveTab('landing')}
