@@ -1,6 +1,6 @@
 {
-  "name": "",
-  "description": "",
+  "name": "EduTrack",
+  "description": "EduTrack is a modern school management dashboard designed for schools in Pakistan, supporting bilingual interfaces and PWA support.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }
