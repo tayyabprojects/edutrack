@@ -5,6 +5,8 @@ import {
 } from 'firebase/firestore';
 import { Language, SchoolProfile, Complaint } from '../types';
 import tayyabPortrait from '../assets/images/tayyab_real_final_beauty.png';
+import tayyabAlternative1 from '../assets/images/muhammad_tayyab_1779779674101_1779781067546.png';
+import tayyabAlternative2 from '../assets/images/muhammad_tayyab_1779779674101.png';
 import { 
   GraduationCap, LogOut, Users, MessageSquare, CheckCircle, Clock, 
   Search, ShieldAlert, Award, Globe, ToggleLeft, ToggleRight, Loader2, Sparkles, AlertTriangle, X
@@ -23,22 +25,25 @@ export default function AdminDashboard({ currentLang, onToggleLang, onLogout }: 
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'schools' | 'applications' | 'complaints'>('schools');
   
-  const [imgSrc, setImgSrc] = useState<string>(tayyabPortrait);
-  const [fallbackAttempt, setFallbackAttempt] = useState<number>(0);
+  const basePrefix = import.meta.env.BASE_URL || './';
+  const cleanBase = basePrefix.endsWith('/') ? basePrefix : basePrefix + '/';
+
+  const imageSources = [
+    tayyabPortrait,
+    tayyabAlternative1,
+    tayyabAlternative2,
+    `${cleanBase}tayyab_real_final_beauty.png`,
+    'tayyab_real_final_beauty.png',
+  ];
+
+  const [imgSrc, setImgSrc] = useState<string>(imageSources[0]);
+  const [attemptIndex, setAttemptIndex] = useState<number>(0);
 
   const handleImgError = () => {
-    if (fallbackAttempt === 0) {
-      setImgSrc('/tayyab_real_final_beauty.png');
-      setFallbackAttempt(1);
-    } else if (fallbackAttempt === 1) {
-      setImgSrc('/src/assets/images/muhammad_tayyab_1779779674101_1779781067546.png');
-      setFallbackAttempt(2);
-    } else if (fallbackAttempt === 2) {
-      setImgSrc('/src/assets/images/muhammad_tayyab_1779779674101.png');
-      setFallbackAttempt(3);
-    } else if (fallbackAttempt === 3) {
-      setImgSrc('tayyab_real_final_beauty.png');
-      setFallbackAttempt(4);
+    const nextIndex = attemptIndex + 1;
+    if (nextIndex < imageSources.length) {
+      setImgSrc(imageSources[nextIndex]);
+      setAttemptIndex(nextIndex);
     }
   };
   
