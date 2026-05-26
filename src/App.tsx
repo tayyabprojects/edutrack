@@ -11,6 +11,7 @@ import { Language, SchoolProfile } from './types';
 import LandingPage from './components/LandingPage';
 import Dashboard from './components/Dashboard';
 import AdminDashboard from './components/AdminDashboard';
+import InstallPrompt from './components/InstallPrompt';
 import { 
   GraduationCap, X, AlertTriangle, HelpCircle, 
   Mail, Lock, User as UserIcon, MapPin, Users, Phone 
@@ -486,6 +487,9 @@ export default function App() {
           </div>
         )}
       </AnimatePresence>
+
+      {/* Android and Mobile customized PWA Install trigger banner */}
+      <InstallPrompt currentLang={currentLang} />
 
     </div>
   );

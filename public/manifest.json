@@ -1,0 +1,18 @@
+{
+  "short_name": "EduTrack",
+  "name": "EduTrack - School Management SaaS",
+  "description": "Modern bilingual school management dashboard designed for Pakistani schools.",
+  "icons": [
+    {
+      "src": "/logo_pwa.png",
+      "type": "image/png",
+      "sizes": "512x512",
+      "purpose": "any maskable"
+    }
+  ],
+  "start_url": "/",
+  "background_color": "#ffffff",
+  "theme_color": "#1e40af",
+  "display": "standalone",
+  "orientation": "portrait"
+}
