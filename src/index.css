@@ -1,0 +1,71 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;700&family=Noto+Nastaliq+Urdu:wght@400;700&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --font-sans: "Inter", "Noto Nastaliq Urdu", ui-sans-serif, system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+}
+
+@layer base {
+  html {
+    scroll-behavior: smooth;
+  }
+}
+
+/* Custom CSS Marquee Ticker Animation */
+@keyframes marquee {
+  0% { transform: translateX(0%); }
+  100% { transform: translateX(-50%); }
+}
+
+.animate-marquee {
+  display: flex;
+  width: max-content;
+  animation: marquee 25s linear infinite;
+}
+
+[dir="rtl"] .animate-marquee {
+  animation: marquee 25s linear infinite reverse;
+}
+
+/* Spin slow */
+.animate-spin-slow {
+  animation: spin 6s linear infinite;
+}
+
+/* Beautiful print stylesheets for PDF/print generation of Report Cards and Salary Slip Slis */
+@media print {
+  /* Hide all elements during print cycle except active target portal */
+  body * {
+    visibility: hidden;
+  }
+  
+  #printable-report-body, 
+  #printable-report-body *,
+  #printable-slip-body,
+  #printable-slip-body *,
+  #printable-ai-report-body,
+  #printable-ai-report-body * {
+    visibility: visible;
+  }
+  
+  /* Absolute placement positioning for print canvas content container */
+  #printable-report-body,
+  #printable-slip-body,
+  #printable-ai-report-body {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
+    border: none !important;
+    box-shadow: none !important;
+    background: white !important;
+    color: black !important;
+  }
+
+  /* Hide raw interactive elements when printing */
+  .no-print, .no-print * {
+    display: none !important;
+    visibility: hidden !important;
+  }
+}

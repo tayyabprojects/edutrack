@@ -1,0 +1,176 @@
+{
+  "entities": {
+    "profile": {
+      "title": "School Profile",
+      "description": "Details and preferences of the school",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "address": { "type": "string" },
+        "city": { "type": "string" },
+        "phone": { "type": "string" },
+        "email": { "type": "string" },
+        "trialEndDate": { "type": "string", "format": "date-time" },
+        "plan": { "type": "string" },
+        "academicYearStart": { "type": "string" },
+        "academicYearEnd": { "type": "string" },
+        "classFees": { "type": "object" },
+        "whatsapp": { "type": "string" },
+        "geminiApiKey": { "type": "string" }
+      },
+      "required": ["name", "email"]
+    },
+    "student": {
+      "title": "Student",
+      "description": "Student roster record",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "fatherName": { "type": "string" },
+        "class": { "type": "string" },
+        "rollNo": { "type": "string" },
+        "dob": { "type": "string" },
+        "address": { "type": "string" },
+        "phone": { "type": "string" },
+        "gender": { "type": "string" },
+        "createdAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["name", "fatherName", "class", "rollNo"]
+    },
+    "attendance_record": {
+      "title": "Attendance Record",
+      "description": "Daily class attendance log",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string" },
+        "class": { "type": "string" },
+        "records": { "type": "array" }
+      },
+      "required": ["date", "class", "records"]
+    },
+    "fee_record": {
+      "title": "Fee Record",
+      "description": "Student fee payment tracking",
+      "type": "object",
+      "properties": {
+        "studentId": { "type": "string" },
+        "amount": { "type": "number" },
+        "paid": { "type": "number" },
+        "balance": { "type": "number" },
+        "month": { "type": "string" },
+        "receiptNo": { "type": "string" },
+        "paidDate": { "type": "string" }
+      },
+      "required": ["studentId", "amount", "paid", "balance", "month"]
+    },
+    "exam_result": {
+      "title": "Exam Result",
+      "description": "Subject marks and grades for classmates",
+      "type": "object",
+      "properties": {
+        "examName": { "type": "string" },
+        "date": { "type": "string" },
+        "records": { "type": "array" }
+      },
+      "required": ["examName", "date", "records"]
+    },
+    "staff_member": {
+      "title": "Staff Member",
+      "description": "School staff/faculty profiling",
+      "type": "object",
+      "properties": {
+        "name": { "type": "string" },
+        "role": { "type": "string" },
+        "subject": { "type": "string" },
+        "phone": { "type": "string" },
+        "salary": { "type": "number" },
+        "joinDate": { "type": "string" },
+        "status": { "type": "string" }
+      },
+      "required": ["name", "role", "salary", "status"]
+    },
+    "payroll_record": {
+      "title": "Payroll Record",
+      "description": "Staff salary disbursement tracking",
+      "type": "object",
+      "properties": {
+        "staffId": { "type": "string" },
+        "month": { "type": "string" },
+        "basic": { "type": "number" },
+        "deductions": { "type": "number" },
+        "bonus": { "type": "number" },
+        "net": { "type": "number" },
+        "status": { "type": "string" }
+      },
+      "required": ["staffId", "month", "basic", "deductions", "bonus", "net", "status"]
+    },
+    "expense_record": {
+      "title": "Expense Record",
+      "description": "School expenses tracking",
+      "type": "object",
+      "properties": {
+        "date": { "type": "string" },
+        "category": { "type": "string" },
+        "description": { "type": "string" },
+        "amount": { "type": "number" },
+        "addedBy": { "type": "string" }
+      },
+      "required": ["date", "category", "description", "amount"]
+    },
+    "complaint": {
+      "title": "Complaint / Support Ticket",
+      "description": "User feedback, reports and help tickets",
+      "type": "object",
+      "properties": {
+        "schoolId": { "type": "string" },
+        "schoolName": { "type": "string" },
+        "email": { "type": "string" },
+        "subject": { "type": "string" },
+        "description": { "type": "string" },
+        "status": { "type": "string", "enum": ["Pending", "In Progress", "Resolved"] },
+        "createdAt": { "type": "string", "format": "date-time" },
+        "reply": { "type": "string" },
+        "repliedAt": { "type": "string", "format": "date-time" }
+      },
+      "required": ["schoolId", "schoolName", "email", "subject", "description", "status"]
+    }
+  },
+  "firestore": {
+    "schools/{schoolId}/profile/main": {
+      "schema": "profile",
+      "description": "Holds individual schools main profile settings"
+    },
+    "schools/{schoolId}/students/{studentId}": {
+      "schema": "student",
+      "description": "Individual student data inside the school scope"
+    },
+    "schools/{schoolId}/attendance/{date_class}": {
+      "schema": "attendance_record",
+      "description": "Daily attendance record grouped by date and class key"
+    },
+    "schools/{schoolId}/fees/{feeId}": {
+      "schema": "fee_record",
+      "description": "School tuition fees payment record"
+    },
+    "schools/{schoolId}/results/{examId}": {
+      "schema": "exam_result",
+      "description": "Class results for tests and exam terms"
+    },
+    "schools/{schoolId}/staff/{staffId}": {
+      "schema": "staff_member",
+      "description": "Faculty and support staff profile list"
+    },
+    "schools/{schoolId}/payroll/{payrollId}": {
+      "schema": "payroll_record",
+      "description": "Staff payroll slip generated monthly"
+    },
+    "schools/{schoolId}/expenses/{expenseId}": {
+      "schema": "expense_record",
+      "description": "Operational expense transactions list"
+    },
+    "complaints/{complaintId}": {
+      "schema": "complaint",
+      "description": "Global user tickets and complaints for the SaaS host platform"
+    }
+  }
+}
