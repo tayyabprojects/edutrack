@@ -18,30 +18,13 @@ export default function AboutUs({ currentLang, onBack }: AboutUsProps) {
   const basePrefix = import.meta.env.BASE_URL || './';
   const cleanBase = basePrefix.endsWith('/') ? basePrefix : basePrefix + '/';
 
-  const getDynamicImagePath = (filename: string) => {
-    try {
-      const hostname = window.location.hostname;
-      const pathname = window.location.pathname;
-      const t = Date.now();
-      if (hostname.endsWith('github.io')) {
-        const parts = pathname.split('/').filter(Boolean);
-        if (parts.length > 0) {
-          const repoName = parts[0];
-          return `/${repoName}/${filename}?v=${t}`;
-        }
-      }
-      return `/${filename}?v=${t}`;
-    } catch (e) {}
-    return `/${filename}`;
-  };
-
   const imageSources = [
-    tayyabPortrait ? `${tayyabPortrait}?v=${Date.now()}` : '',
-    getDynamicImagePath('tayyab_real_final_beauty.png'),
-    `tayyab_real_final_beauty.png?v=${Date.now()}`,
-    `${cleanBase}tayyab_real_final_beauty.png?v=${Date.now()}`,
-    `/tayyab_real_final_beauty.png?v=${Date.now()}`,
-  ].filter(Boolean);
+    tayyabPortrait,
+    './tayyab_real_final_beauty.png',
+    'tayyab_real_final_beauty.png',
+    `${cleanBase}tayyab_real_final_beauty.png`,
+    '/tayyab_real_final_beauty.png',
+  ].filter(Boolean) as string[];
 
   const [imgSrc, setImgSrc] = React.useState<string>(imageSources[0]);
   const [attemptIndex, setAttemptIndex] = React.useState<number>(0);
