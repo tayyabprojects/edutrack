@@ -15,6 +15,25 @@ interface AboutUsProps {
 export default function AboutUs({ currentLang, onBack }: AboutUsProps) {
   const isRTL = currentLang === 'ur';
 
+  const [imgSrc, setImgSrc] = React.useState<string>(tayyabPortrait);
+  const [fallbackAttempt, setFallbackAttempt] = React.useState<number>(0);
+
+  const handleImgError = () => {
+    if (fallbackAttempt === 0) {
+      setImgSrc('/tayyab_real_final_beauty.png');
+      setFallbackAttempt(1);
+    } else if (fallbackAttempt === 1) {
+      setImgSrc('/src/assets/images/muhammad_tayyab_1779779674101_1779781067546.png');
+      setFallbackAttempt(2);
+    } else if (fallbackAttempt === 2) {
+      setImgSrc('/src/assets/images/muhammad_tayyab_1779779674101.png');
+      setFallbackAttempt(3);
+    } else if (fallbackAttempt === 3) {
+      setImgSrc('tayyab_real_final_beauty.png');
+      setFallbackAttempt(4);
+    }
+  };
+
   // Localized Dictionary for About Developer Page
   const d = {
     en: {
@@ -111,11 +130,12 @@ export default function AboutUs({ currentLang, onBack }: AboutUsProps) {
                 <div className="absolute -inset-1.5 bg-[#00c896] rounded-3xl blur-md opacity-40 group-hover:opacity-100 transition duration-500" />
                 <div className="relative w-44 h-56 rounded-2xl overflow-hidden border-4 border-white/90 bg-slate-800 shadow-2xl shrink-0">
                   <img 
-                    src={tayyabPortrait}
+                    src={imgSrc}
                     alt="Muhammad Tayyab portrait" 
                     className="w-full h-full object-cover"
                     referrerPolicy="no-referrer"
                     id="developer-photo-avatar"
+                    onError={handleImgError}
                   />
                 </div>
               </div>

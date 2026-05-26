@@ -23,6 +23,25 @@ export default function AdminDashboard({ currentLang, onToggleLang, onLogout }: 
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'schools' | 'applications' | 'complaints'>('schools');
   
+  const [imgSrc, setImgSrc] = useState<string>(tayyabPortrait);
+  const [fallbackAttempt, setFallbackAttempt] = useState<number>(0);
+
+  const handleImgError = () => {
+    if (fallbackAttempt === 0) {
+      setImgSrc('/tayyab_real_final_beauty.png');
+      setFallbackAttempt(1);
+    } else if (fallbackAttempt === 1) {
+      setImgSrc('/src/assets/images/muhammad_tayyab_1779779674101_1779781067546.png');
+      setFallbackAttempt(2);
+    } else if (fallbackAttempt === 2) {
+      setImgSrc('/src/assets/images/muhammad_tayyab_1779779674101.png');
+      setFallbackAttempt(3);
+    } else if (fallbackAttempt === 3) {
+      setImgSrc('tayyab_real_final_beauty.png');
+      setFallbackAttempt(4);
+    }
+  };
+  
   // Complaint Reply Modal State
   const [selectedComplaint, setSelectedComplaint] = useState<Complaint | null>(null);
   const [adminReply, setAdminReply] = useState('');
@@ -258,10 +277,11 @@ export default function AdminDashboard({ currentLang, onToggleLang, onLogout }: 
             <div className="relative shrink-0">
               <div className="absolute -inset-1 bg-[#00c896] rounded-2xl blur opacity-30" />
               <img 
-                src={tayyabPortrait} 
+                src={imgSrc} 
                 alt="Muhammad Tayyab Headshot" 
                 className="relative w-20 h-24 object-cover rounded-xl border-2 border-white/90 shadow-lg"
                 referrerPolicy="no-referrer"
+                onError={handleImgError}
               />
             </div>
             <div>
