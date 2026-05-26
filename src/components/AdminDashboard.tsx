@@ -4,6 +4,7 @@ import {
   collection, getDocs, doc, setDoc, updateDoc, onSnapshot, query, orderBy
 } from 'firebase/firestore';
 import { Language, SchoolProfile, Complaint } from '../types';
+import tayyabPortrait from '../assets/images/tayyab_real_final_beauty.png';
 import { 
   GraduationCap, LogOut, Users, MessageSquare, CheckCircle, Clock, 
   Search, ShieldAlert, Award, Globe, ToggleLeft, ToggleRight, Loader2, Sparkles, AlertTriangle, X
@@ -257,7 +258,7 @@ export default function AdminDashboard({ currentLang, onToggleLang, onLogout }: 
             <div className="relative shrink-0">
               <div className="absolute -inset-1 bg-[#00c896] rounded-2xl blur opacity-30" />
               <img 
-                src="/tayyab_real_final_beauty.png" 
+                src={tayyabPortrait} 
                 alt="Muhammad Tayyab Headshot" 
                 className="relative w-20 h-24 object-cover rounded-xl border-2 border-white/90 shadow-lg"
                 referrerPolicy="no-referrer"

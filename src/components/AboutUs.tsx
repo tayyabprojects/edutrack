@@ -5,6 +5,7 @@ import {
   Award, ArrowLeft, Mail, CheckCircle, Code, ShieldCheck, HeartPulse
 } from 'lucide-react';
 import { Language } from '../types';
+import tayyabPortrait from '../assets/images/tayyab_real_final_beauty.png';
 
 interface AboutUsProps {
   currentLang: Language;
@@ -110,7 +111,7 @@ export default function AboutUs({ currentLang, onBack }: AboutUsProps) {
                 <div className="absolute -inset-1.5 bg-[#00c896] rounded-3xl blur-md opacity-40 group-hover:opacity-100 transition duration-500" />
                 <div className="relative w-44 h-56 rounded-2xl overflow-hidden border-4 border-white/90 bg-slate-800 shadow-2xl shrink-0">
                   <img 
-                    src="/tayyab_real_final_beauty.png"
+                    src={tayyabPortrait}
                     alt="Muhammad Tayyab portrait" 
                     className="w-full h-full object-cover"
                     referrerPolicy="no-referrer"
