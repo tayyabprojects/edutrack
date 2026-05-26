@@ -6,8 +6,6 @@ import {
 } from 'lucide-react';
 import { Language } from '../types';
 import tayyabPortrait from '../assets/images/tayyab_real_final_beauty.png';
-import tayyabAlternative1 from '../assets/images/muhammad_tayyab_1779779674101_1779781067546.png';
-import tayyabAlternative2 from '../assets/images/muhammad_tayyab_1779779674101.png';
 
 interface AboutUsProps {
   currentLang: Language;
@@ -22,10 +20,9 @@ export default function AboutUs({ currentLang, onBack }: AboutUsProps) {
 
   const imageSources = [
     tayyabPortrait,
-    tayyabAlternative1,
-    tayyabAlternative2,
-    `${cleanBase}tayyab_real_final_beauty.png`,
     'tayyab_real_final_beauty.png',
+    `${cleanBase}tayyab_real_final_beauty.png`,
+    '/tayyab_real_final_beauty.png',
   ];
 
   const [imgSrc, setImgSrc] = React.useState<string>(imageSources[0]);

@@ -5,8 +5,6 @@ import {
 } from 'firebase/firestore';
 import { Language, SchoolProfile, Complaint } from '../types';
 import tayyabPortrait from '../assets/images/tayyab_real_final_beauty.png';
-import tayyabAlternative1 from '../assets/images/muhammad_tayyab_1779779674101_1779781067546.png';
-import tayyabAlternative2 from '../assets/images/muhammad_tayyab_1779779674101.png';
 import { 
   GraduationCap, LogOut, Users, MessageSquare, CheckCircle, Clock, 
   Search, ShieldAlert, Award, Globe, ToggleLeft, ToggleRight, Loader2, Sparkles, AlertTriangle, X
@@ -30,10 +28,9 @@ export default function AdminDashboard({ currentLang, onToggleLang, onLogout }: 
 
   const imageSources = [
     tayyabPortrait,
-    tayyabAlternative1,
-    tayyabAlternative2,
-    `${cleanBase}tayyab_real_final_beauty.png`,
     'tayyab_real_final_beauty.png',
+    `${cleanBase}tayyab_real_final_beauty.png`,
+    '/tayyab_real_final_beauty.png',
   ];
 
   const [imgSrc, setImgSrc] = useState<string>(imageSources[0]);
