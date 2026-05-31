@@ -93,7 +93,8 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
 
   // Form Inputs Buffer
   const [studentForm, setStudentForm] = useState({
-    name: '', fatherName: '', class: 'Class 1', rollNo: '', dob: '', address: '', phone: '', gender: 'Male'
+    name: '', fatherName: '', class: 'Class 1', rollNo: '', dob: '', address: '', phone: '', gender: 'Male',
+    createdAt: ''
   });
   const [feeForm, setFeeForm] = useState({ amount: 0, month: 'May 2026' });
   const [feeSelectedMonth, setFeeSelectedMonth] = useState('May 2026');
@@ -311,12 +312,47 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
     "July 2026", "August 2026", "September 2026", "October 2026", "November 2026", "December 2026"
   ];
 
+  const getStudentStartMonthIndex = (student: Student) => {
+    if (!student || !student.createdAt) return 0;
+    try {
+      const d = new Date(student.createdAt);
+      if (isNaN(d.getTime())) return 0;
+      const monthNames = [
+        "January", "February", "March", "April", "May", "June", 
+        "July", "August", "September", "October", "November", "December"
+      ];
+      const monthName = monthNames[d.getMonth()];
+      const year = d.getFullYear();
+      const str = `${monthName} ${year}`;
+      const idx = feeMonthsOrder.indexOf(str);
+      return idx >= 0 ? idx : 0;
+    } catch (e) {
+      return 0;
+    }
+  };
+
+  const getStudentMonthlyDue = (student: Student, targetMonth: string) => {
+    if (!student) return 0;
+    const targetIndex = feeMonthsOrder.indexOf(targetMonth);
+    const startIndex = getStudentStartMonthIndex(student);
+    if (targetIndex < startIndex) {
+      return 0; // Fee starts only from the month of registration
+    }
+    return profile?.classFees?.[student.class] || 2500;
+  };
+
   const getStudentPastArrears = (studentId: string, targetMonth: string, studentClass: string) => {
     const targetIndex = feeMonthsOrder.indexOf(targetMonth);
     if (targetIndex <= 0) return 0;
     
+    const st = students.find(s => s.id === studentId);
+    if (!st) return 0;
+
+    const startIndex = getStudentStartMonthIndex(st);
+    if (targetIndex <= startIndex) return 0;
+    
     let arrears = 0;
-    for (let i = 0; i < targetIndex; i++) {
+    for (let i = startIndex; i < targetIndex; i++) {
       const prevMonth = feeMonthsOrder[i];
       const prevRecord = fees.find(f => f.studentId === studentId && f.month === prevMonth);
       if (prevRecord) {
@@ -339,7 +375,7 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
   }, 0);
 
   const totalPendingCurrentMonth = students.reduce((acc, st) => {
-    const standardFee = profile?.classFees?.[st.class] || 2500;
+    const standardFee = getStudentMonthlyDue(st, feeSelectedMonth);
     const pastArrears = getStudentPastArrears(st.id, feeSelectedMonth, st.class);
     const totalDue = standardFee + pastArrears;
     const record = fees.find(f => f.studentId === st.id && f.month === feeSelectedMonth);
@@ -347,7 +383,7 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
   }, 0);
 
   const defaultersCount = students.filter(st => {
-    const standardFee = profile?.classFees?.[st.class] || 2500;
+    const standardFee = getStudentMonthlyDue(st, feeSelectedMonth);
     const pastArrears = getStudentPastArrears(st.id, feeSelectedMonth, st.class);
     const totalDue = standardFee + pastArrears;
     const record = fees.find(f => f.studentId === st.id && f.month === feeSelectedMonth);
@@ -535,13 +571,15 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
     if (st) {
       setStudentForm({
         name: st.name, fatherName: st.fatherName, class: st.class, rollNo: st.rollNo, 
-        dob: st.dob, address: st.address, phone: st.phone, gender: st.gender
+        dob: st.dob, address: st.address, phone: st.phone, gender: st.gender,
+        createdAt: st.createdAt ? st.createdAt.slice(0, 10) : new Date().toISOString().slice(0, 10)
       });
       setStudentModal({ open: true, editItem: st });
     } else {
       setStudentForm({
         name: '', fatherName: '', class: 'Class 1', rollNo: (students.length + 1).toString(), 
-        dob: '2016-01-01', address: '', phone: '', gender: 'Male'
+        dob: '2016-01-01', address: '', phone: '', gender: 'Male',
+        createdAt: new Date().toISOString().slice(0, 10)
       });
       setStudentModal({ open: true, editItem: null });
     }
@@ -555,10 +593,17 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
     }
 
     try {
+      const selectedCreatedAt = studentForm.createdAt 
+        ? new Date(studentForm.createdAt).toISOString() 
+        : new Date().toISOString();
+
       if (studentModal.editItem) {
         // Update
         const docRef = doc(db, 'schools', schoolId, 'students', studentModal.editItem.id);
-        const updatedObj = { ...studentForm };
+        const updatedObj = { 
+          ...studentForm,
+          createdAt: selectedCreatedAt
+        };
         await setDoc(docRef, updatedObj, { merge: true });
         triggerToast('طالب علم ریکارڈ کامیابی سے تبدیل کیا گیا / Student successfully updated.');
       } else {
@@ -568,7 +613,7 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
         const newObj: Student = {
           id: docId,
           ...studentForm,
-          createdAt: new Date().toISOString()
+          createdAt: selectedCreatedAt
         };
         await setDoc(newDocRef, newObj);
         triggerToast('نیا طالب علم کامیابی سے شامل کیا گیا / Student successfully created.');
@@ -705,7 +750,7 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
 
   // FEE COLLECTION LOGIC
   const handleOpenFeeCollectModal = (st: Student) => {
-    const currentClassFee = profile?.classFees?.[st.class] || 2500;
+    const currentClassFee = getStudentMonthlyDue(st, feeSelectedMonth);
     const pastArrears = getStudentPastArrears(st.id, feeSelectedMonth, st.class);
     const totalDue = currentClassFee + pastArrears;
     
@@ -728,7 +773,7 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
     const feeId = `${sId}_${feeForm.month.replace(' ', '_')}`;
     const feeRef = doc(db, 'schools', schoolId, 'fees', feeId);
 
-    const defaultClassFee = profile?.classFees?.[feeModal.student.class] || 2500;
+    const defaultClassFee = getStudentMonthlyDue(feeModal.student, feeForm.month);
     const pastArrears = getStudentPastArrears(sId, feeForm.month, feeModal.student.class);
     const totalDue = defaultClassFee + pastArrears;
 
@@ -1711,6 +1756,7 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
                           <th className="py-3 px-4">طالب علم کا نام</th>
                           <th className="py-3 px-4">کلاس</th>
                           <th className="py-3 px-4">ولدیت</th>
+                          <th className="py-3 px-4">داخلہ تاریخ / Adm Date</th>
                           <th className="py-3 px-4">موبائل فون</th>
                           <th className="py-3 px-4">جنس</th>
                           <th className="py-3 px-4 text-center">حاضری فیصدی (Attendance %)</th>
@@ -1729,6 +1775,9 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
                               <td className="py-3.5 px-4 font-bold text-[#0f1b3d]">{st.name}</td>
                               <td className="py-3.5 px-4">{st.class}</td>
                               <td className="py-3.5 px-4">{st.fatherName}</td>
+                              <td className="py-3.5 px-4 font-mono">
+                                {st.createdAt ? new Date(st.createdAt).toLocaleDateString('ur-PK', { year: 'numeric', month: 'short', day: 'numeric' }) : '—'}
+                              </td>
                               <td className="py-3.5 px-4 font-mono">{st.phone || '—'}</td>
                               <td className="py-3.5 px-4">{st.gender}</td>
                               <td className="py-3.5 px-4 text-center">
@@ -2758,6 +2807,17 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
                     value={studentForm.phone}
                     onChange={(e) => setStudentForm(prev => ({ ...prev, phone: e.target.value }))}
                     className="w-full text-sm p-3 bg-slate-50 border rounded-xl outline-none font-sans"
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500">تاریخِ داخلہ / Admission Date *</label>
+                  <input 
+                    type="date" 
+                    value={studentForm.createdAt}
+                    onChange={(e) => setStudentForm(prev => ({ ...prev, createdAt: e.target.value }))}
+                    className="w-full text-sm p-3 bg-slate-50 border rounded-xl outline-none font-sans text-center"
+                    required
                   />
                 </div>
               </div>
