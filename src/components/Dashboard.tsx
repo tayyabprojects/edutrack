@@ -71,6 +71,16 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
   const [staffModal, setStaffModal] = useState<{ open: boolean; editItem?: StaffMember | null }>({ open: false });
   const [expenseModal, setExpenseModal] = useState<boolean>(false);
   const [examScheduleModal, setExamScheduleModal] = useState<{ open: boolean; editItem?: ExamScheduleItem | null }>({ open: false });
+  const [bulkExamScheduleModal, setBulkExamScheduleModal] = useState<boolean>(false);
+  const [bulkExamForm, setBulkExamForm] = useState({
+    examName: 'Final Exams 2026',
+    startDate: '2026-06-01',
+    subjects: 'English, Urdu, Mathematics, Science, Islamiat',
+    startTime: '09:00',
+    endTime: '12:00',
+    totalMarks: 100,
+    classes: ['Class 1', 'Class 2', 'Class 3', 'Class 4', 'Class 5', 'Class 6', 'Class 7', 'Class 8', 'Class 9', 'Class 10']
+  });
 
 
   // Active printable previews/slips
@@ -78,6 +88,8 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
   const [activeSalarySlip, setActiveSalarySlip] = useState<{ staff: StaffMember; record: PayrollRecord } | null>(null);
   const [activeAiReportPrint, setActiveAiReportPrint] = useState<SavedAIReport | null>(null);
   const [activeFeeVoucher, setActiveFeeVoucher] = useState<{ student: Student; record: FeeRecord | any } | null>(null);
+  const [activeDateSheetClass, setActiveDateSheetClass] = useState<string | null>(null);
+  const [examClassFilter, setExamClassFilter] = useState<string>('All Classes');
 
   // Form Inputs Buffer
   const [studentForm, setStudentForm] = useState({
@@ -929,6 +941,109 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
       triggerToast('شیڈول کامیابی سے حذف کیا گیا / Exam schedule deleted.');
     } catch (err) {
       handleFirestoreError(err, OperationType.DELETE, `schools/${schoolId}/examschedule/${scheduleId}`);
+    }
+  };
+
+  const handleClearAllSchedules = async () => {
+    if (examSchedules.length === 0) {
+      triggerToast('کوئی شیڈول صاف کرنے کے لیے موجود نہیں ہے / There are no schedules to clear.', 'error');
+      return;
+    }
+    if (!confirm('کیا آپ واقعی تمام امتحانی شیڈول حذف کرنا چاہتے ہیں؟ یہ عمل واپس نہیں کیا جا سکتا۔ / Are you sure you want to clear ALL scheduled exams? This action is irreversible.')) return;
+    setLoading(true);
+    try {
+      const batch = writeBatch(db);
+      examSchedules.forEach(item => {
+        const docRef = doc(db, 'schools', schoolId, 'examschedule', item.id);
+        batch.delete(docRef);
+      });
+      await batch.commit();
+      triggerToast('تمام امتحانی شیڈول کامیابی سے صاف ہو گئے ہیں / Cleared all exam schedules successfully.');
+    } catch (err) {
+      console.error(err);
+      triggerToast('تمام شیڈول صاف کرنے میں خرابی پیش آئی / Failed to clear schedules.', 'error');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleSaveBulkExamSchedule = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!bulkExamForm.examName || !bulkExamForm.subjects || !bulkExamForm.startDate) {
+      triggerToast('برائے مہربانی تمام معلومات فراہم کریں / Please fill the required fields.', 'error');
+      return;
+    }
+
+    const subjs = bulkExamForm.subjects
+      .split(/[,;\n]/)
+      .map(s => s.trim())
+      .filter(s => s.length > 0);
+
+    if (subjs.length === 0) {
+      triggerToast('برائے مہربانی کم از کم ایک پرچہ / مضمون لکھیں / Please specify at least one subject.', 'error');
+      return;
+    }
+
+    if (bulkExamForm.classes.length === 0) {
+      triggerToast('برائے مہربانی کم از کم ایک کلاس منتخب کریں / Please select at least one class.', 'error');
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const batch = writeBatch(db);
+      
+      const scheduledDates: string[] = [];
+      let currentDate = new Date(bulkExamForm.startDate);
+      
+      for (let i = 0; i < subjs.length; i++) {
+        // If Sunday, skip to Monday
+        if (currentDate.getDay() === 0) {
+          currentDate.setDate(currentDate.getDate() + 1);
+        }
+        
+        const yyyy = currentDate.getFullYear();
+        const mm = String(currentDate.getMonth() + 1).padStart(2, '0');
+        const dd = String(currentDate.getDate()).padStart(2, '0');
+        scheduledDates.push(`${yyyy}-${mm}-${dd}`);
+        
+        currentDate.setDate(currentDate.getDate() + 1);
+      }
+
+      let count = 0;
+      for (let sIdx = 0; sIdx < subjs.length; sIdx++) {
+        const subjectName = subjs[sIdx];
+        const examDate = scheduledDates[sIdx];
+
+        for (let cIdx = 0; cIdx < bulkExamForm.classes.length; cIdx++) {
+          const className = bulkExamForm.classes[cIdx];
+          const docId = `exsch_bulk_${Date.now()}_${count}`;
+          const docRef = doc(db, 'schools', schoolId, 'examschedule', docId);
+          
+          const newObj: ExamScheduleItem = {
+            id: docId,
+            examName: bulkExamForm.examName,
+            class: className,
+            subject: subjectName,
+            date: examDate,
+            startTime: bulkExamForm.startTime,
+            endTime: bulkExamForm.endTime,
+            totalMarks: bulkExamForm.totalMarks,
+            roomNo: `Room ${String.fromCharCode(65 + (cIdx % 6))}`
+          };
+          batch.set(docRef, newObj);
+          count++;
+        }
+      }
+
+      await batch.commit();
+      triggerToast(`کامیابی سے کُل ${count} شیڈول تیار کر دیئے گئے ہیں / Successfully generated ${count} exam schedules.`);
+      setBulkExamScheduleModal(false);
+    } catch (err) {
+      console.error(err);
+      triggerToast('شیڈول تیار کرنے میں خرابی پیش آئی / Failed to generate bulk schedules.', 'error');
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -2037,144 +2152,209 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
 
 
             {/* MODULE: EXAMS SCHEDULE */}
-            {activeModule === 'exams_schedule' && (
-              <div className="space-y-6" id="module-exams-schedule">
-                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-6 rounded-2xl border border-slate-200/60 shadow-xs">
-                  <div className="space-y-1 text-right sm:text-left">
-                    <h3 className="font-extrabold text-[#0f1b3d] text-lg flex items-center gap-2">
-                      <span className="w-2.5 h-6 bg-[#00c896] rounded-full inline-block"></span>
-                      <span>امتحانی شیڈولنگ بورڈ / Exam Schedule Board</span>
-                    </h3>
-                    <p className="text-xs text-slate-400">تمام کلاسوں اور پرچوں کے امتحانی نظام الاوقات کو یہاں سے مینیج کریں</p>
-                  </div>
-                  
-                  <button 
-                    onClick={() => {
-                      setExamScheduleForm({
-                        examName: 'Final Exams 2026',
-                        class: 'Class 5',
-                        subject: 'Mathematics',
-                        date: '2026-06-05',
-                        startTime: '09:00',
-                        endTime: '12:00',
-                        totalMarks: 100,
-                        roomNo: 'Room A'
-                      });
-                      setExamScheduleModal({ open: true, editItem: null });
-                    }}
-                    className="w-full sm:w-auto px-5 py-2.5 bg-[#0f1b3d] text-[#00c896] hover:bg-opacity-90 font-extrabold text-xs rounded-xl flex items-center justify-center gap-2 border border-emerald-500/20 shadow-xs transition-colors"
-                  >
-                    <Plus className="h-4 w-4" />
-                    <span>نیا امتحان شیڈول کریں / Create Schedule</span>
-                  </button>
-                </div>
+            {activeModule === 'exams_schedule' && (() => {
+              const filteredSchedules = examSchedules.filter(item => {
+                const query = (examSearchQuery || '').toLowerCase();
+                const matchesSearch = (item.examName || '').toLowerCase().includes(query) ||
+                                      (item.class || '').toLowerCase().includes(query) ||
+                                      (item.subject || '').toLowerCase().includes(query);
+                const matchesClass = examClassFilter === 'All Classes' || item.class === examClassFilter;
+                return matchesSearch && matchesClass;
+              });
 
-                {/* Filter and stats */}
-                <div className="bg-white rounded-2xl border border-slate-200/60 p-6 shadow-xs space-y-6">
-                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-center">
-                    <div className="md:col-span-2 relative">
-                      <Search className="absolute right-3.5 top-3.5 h-4 w-4 text-slate-400" />
-                      <input 
-                        type="text" 
-                        placeholder="کلاس، مضمون یا امتحان کے نام سے تلاش کریں... / Search by exam, class, subject..."
-                        value={examSearchQuery}
-                        onChange={(e) => setExamSearchQuery(e.target.value)}
-                        className="w-full text-xs font-semibold pr-10 pl-4 py-3 bg-slate-50 hover:bg-slate-100/50 focus:bg-white border rounded-xl outline-none focus:border-indigo-400 transition-all text-right"
-                      />
+              return (
+                <div className="space-y-6" id="module-exams-schedule">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-6 rounded-2xl border border-slate-200/60 shadow-xs">
+                    <div className="space-y-1 text-right sm:text-left">
+                      <h3 className="font-extrabold text-[#0f1b3d] text-lg flex items-center gap-2">
+                        <span className="w-2.5 h-6 bg-[#00c896] rounded-full inline-block"></span>
+                        <span>امتحانی شیڈولنگ بورڈ / Exam Schedule Board</span>
+                      </h3>
+                      <p className="text-xs text-slate-400">تمام کلاسوں اور پرچوں کے امتحانی نظام الاوقات کو یہاں سے مینیج کریں</p>
                     </div>
                     
-                    <div className="p-3.5 bg-slate-50 rounded-xl flex justify-between items-center text-xs">
-                      <span className="text-slate-400">کُل شیڈولڈ پیپرز:</span>
-                      <span className="font-extrabold text-[#0f1b3d] font-sans text-sm">{examSchedules.length} Papers</span>
-                    </div>
+                    <div className="flex flex-wrap items-center gap-3 w-full sm:w-auto">
+                      <button 
+                        onClick={() => {
+                          setBulkExamForm({
+                            examName: 'Final Exams 2026',
+                            startDate: '2026-06-01',
+                            subjects: 'English, Mathematics, Science, Urdu, Islamiat',
+                            startTime: '09:00',
+                            endTime: '12:00',
+                            totalMarks: 100,
+                            classes: ['Class 1', 'Class 2', 'Class 3', 'Class 4', 'Class 5', 'Class 6', 'Class 7', 'Class 8', 'Class 9', 'Class 10']
+                          });
+                          setBulkExamScheduleModal(true);
+                        }}
+                        className="w-full sm:w-auto px-5 py-2.5 bg-gradient-to-r from-teal-500 to-emerald-600 hover:from-teal-600 hover:to-emerald-700 text-white font-extrabold text-xs rounded-xl flex items-center justify-center gap-2 shadow-xs transition-colors cursor-pointer"
+                      >
+                        <Sparkles className="h-4 w-4 text-emerald-100" />
+                        <span>سب کلاسز کا شیڈول ایک بار میں تیار کریں / Bulk Create (All Classes)</span>
+                      </button>
 
-                    <div className="p-3.5 bg-slate-50 rounded-xl flex justify-between items-center text-xs">
-                      <span className="text-slate-400">امتحان کا عنوان:</span>
-                      <span className="font-extrabold text-emerald-700 font-sans text-xs">Bilingual Board</span>
+                      <button 
+                        onClick={() => {
+                          setExamScheduleForm({
+                            examName: 'Final Exams 2026',
+                            class: 'Class 5',
+                            subject: 'Mathematics',
+                            date: '2026-06-05',
+                            startTime: '09:00',
+                            endTime: '12:00',
+                            totalMarks: 100,
+                            roomNo: 'Room A'
+                          });
+                          setExamScheduleModal({ open: true, editItem: null });
+                        }}
+                        className="w-full sm:w-auto px-5 py-2.5 bg-[#0f1b3d] text-[#00c896] hover:bg-opacity-90 font-extrabold text-xs rounded-xl flex items-center justify-center gap-2 border border-emerald-500/20 shadow-xs transition-colors cursor-pointer"
+                      >
+                        <Plus className="h-4 w-4" />
+                        <span>نیا امتحان شیڈول کریں / Create Schedule</span>
+                      </button>
                     </div>
                   </div>
 
-                  {/* Listings */}
-                  <div className="overflow-x-auto rounded-xl border border-slate-100">
-                    <table className="w-full text-right text-xs">
-                      <thead>
-                        <tr className="bg-slate-50 text-slate-500 font-bold border-b border-slate-100">
-                          <th className="py-3.5 px-4">امتحان کا نام / Exam</th>
-                          <th className="py-3.5 px-4 text-center">کلاس / Class</th>
-                          <th className="py-3.5 px-4 text-center">پرچہ / Subject</th>
-                          <th className="py-3.5 px-4 text-center">تاریخ / Date</th>
-                          <th className="py-3.5 px-4 text-center">وقت / Timing</th>
-                          <th className="py-3.5 px-4 text-center">روم نمبر / Room</th>
-                          <th className="py-3.5 px-4 text-center">کُل نمبر / Marks</th>
-                          <th className="py-3.5 px-4 text-center">ایکشنز / Actions</th>
-                        </tr>
-                      </thead>
-                      <tbody className="divide-y divide-slate-100">
-                        {examSchedules.filter(item => {
-                          const query = (examSearchQuery || '').toLowerCase();
-                          return (item.examName || '').toLowerCase().includes(query) ||
-                                 (item.class || '').toLowerCase().includes(query) ||
-                                 (item.subject || '').toLowerCase().includes(query);
-                        }).length === 0 ? (
-                          <tr>
-                            <td colSpan={8} className="py-12 text-center text-slate-400 space-y-3">
-                              <Calendar className="h-10 w-10 mx-auto text-slate-300 stroke-1" />
-                              <p className="font-semibold">کوئی امتحانی شیڈول تاحال موجود نہیں ہے</p>
-                              <p className="text-[11px] text-slate-400">نیا شیڈول بنانے کے لیے اوپر موجود بٹن پر کلک کریں</p>
-                            </td>
+                  {/* Filter and stats */}
+                  <div className="bg-white rounded-2xl border border-slate-200/60 p-6 shadow-xs space-y-6">
+                    <div className="grid grid-cols-1 md:grid-cols-12 gap-4 items-center">
+                      <div className="md:col-span-5 relative">
+                        <Search className="absolute right-3.5 top-3.5 h-4 w-4 text-slate-400" />
+                        <input 
+                          type="text" 
+                          placeholder="کلاس، مضمون یا امتحان تلاش کریں... / Exam, class, subject..."
+                          value={examSearchQuery}
+                          onChange={(e) => setExamSearchQuery(e.target.value)}
+                          className="w-full text-xs font-semibold pr-10 pl-4 py-3 bg-slate-50 hover:bg-slate-100/50 focus:bg-white border rounded-xl outline-none focus:border-indigo-400 transition-all text-right"
+                        />
+                      </div>
+
+                      <div className="md:col-span-3">
+                        <select
+                          value={examClassFilter}
+                          onChange={(e) => setExamClassFilter(e.target.value)}
+                          className="w-full text-xs font-extrabold py-3 px-4 bg-indigo-50/60 border border-indigo-100 hover:border-indigo-200 text-indigo-950 rounded-xl outline-none cursor-pointer transition-all text-right"
+                        >
+                          <option value="All Classes">تمام کلاسیں / All Classes</option>
+                          {['Class 1', 'Class 2', 'Class 3', 'Class 4', 'Class 5', 'Class 6', 'Class 7', 'Class 8', 'Class 9', 'Class 10'].map(cls => (
+                            <option key={cls} value={cls}>{cls}</option>
+                          ))}
+                        </select>
+                      </div>
+                      
+                      <div className="md:col-span-4 flex flex-wrap gap-2 justify-end">
+                        <button
+                          onClick={() => setActiveDateSheetClass(examClassFilter)}
+                          className="px-4 py-2.5 bg-slate-100 hover:bg-slate-200 text-[#0f1b3d] font-extrabold text-xs rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
+                        >
+                          <Printer className="h-4 w-4" />
+                          <span>ڈیٹ شیٹ پرنٹ کریں / Print Date Sheet</span>
+                        </button>
+
+                        <button
+                          onClick={handleClearAllSchedules}
+                          className="px-4 py-2.5 bg-rose-50 hover:bg-rose-100 text-rose-750 font-extrabold text-xs rounded-xl flex items-center gap-1.5 transition-all cursor-pointer"
+                        >
+                          <Trash2 className="h-4 w-4" />
+                          <span>شیڈول صاف کریں / Clear All</span>
+                        </button>
+                      </div>
+                    </div>
+
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div className="p-3 bg-slate-50 rounded-xl flex justify-between items-center text-xs">
+                        <span className="text-slate-400">کُل شیڈولڈ پرچے:</span>
+                        <span className="font-extrabold text-[#0f1b3d] font-sans text-sm">{filteredSchedules.length} Papers</span>
+                      </div>
+
+                      <div className="p-3 bg-slate-50 rounded-xl flex justify-between items-center text-xs">
+                        <span className="text-slate-400">امتحانی بورڈ:</span>
+                        <span className="font-extrabold text-emerald-700 font-sans text-xs">Bilingual Board</span>
+                      </div>
+
+                      <div className="p-3 bg-slate-50 rounded-xl flex justify-between items-center text-xs">
+                        <span className="text-slate-400">فلٹر شدہ کلاس:</span>
+                        <span className="font-extrabold text-indigo-700 text-xs">{examClassFilter}</span>
+                      </div>
+
+                      <div className="p-3 bg-slate-50 rounded-xl flex justify-between items-center text-xs">
+                        <span className="text-slate-400">سستم اسٹیٹس:</span>
+                        <span className="font-extrabold text-emerald-600 text-xs">مستعد / Active</span>
+                      </div>
+                    </div>
+
+                    {/* Listings */}
+                    <div className="overflow-x-auto rounded-xl border border-slate-100">
+                      <table className="w-full text-right text-xs">
+                        <thead>
+                          <tr className="bg-slate-50 text-slate-500 font-bold border-b border-slate-100">
+                            <th className="py-3.5 px-4 text-right">امتحان کا نام / Exam</th>
+                            <th className="py-3.5 px-4 text-center">کلاس / Class</th>
+                            <th className="py-3.5 px-4 text-center">پرچہ / Subject</th>
+                            <th className="py-3.5 px-4 text-center">تاریخ / Date</th>
+                            <th className="py-3.5 px-4 text-center">وقت / Timing</th>
+                            <th className="py-3.5 px-4 text-center">روم نمبر / Room</th>
+                            <th className="py-3.5 px-4 text-center">کُل نمبر / Marks</th>
+                            <th className="py-3.5 px-4 text-center">ایکشنز / Actions</th>
                           </tr>
-                        ) : (
-                          examSchedules.filter(item => {
-                            const query = (examSearchQuery || '').toLowerCase();
-                            return (item.examName || '').toLowerCase().includes(query) ||
-                                   (item.class || '').toLowerCase().includes(query) ||
-                                   (item.subject || '').toLowerCase().includes(query);
-                          }).map(sched => (
-                            <tr key={sched.id} className="hover:bg-slate-50/60 font-medium transition-colors">
-                              <td className="py-4 px-4 font-bold text-slate-800">{sched.examName}</td>
-                              <td className="py-4 px-4 text-center"><span className="px-2 py-1 bg-indigo-50 text-indigo-700 rounded-md font-sans font-bold">{sched.class}</span></td>
-                              <td className="py-4 px-4 text-center text-slate-700 font-bold">{sched.subject}</td>
-                              <td className="py-4 px-4 text-center font-sans font-semibold text-slate-600">{sched.date}</td>
-                              <td className="py-4 px-4 text-center font-sans font-semibold text-slate-500">{sched.startTime} - {sched.endTime}</td>
-                              <td className="py-4 px-4 text-center text-slate-600 font-sans font-semibold">{sched.roomNo || 'N/A'}</td>
-                              <td className="py-4 px-4 text-center font-sans font-bold text-emerald-600 font-sans">{sched.totalMarks || 100}</td>
-                              <td className="py-4 px-4">
-                                <div className="flex items-center justify-center gap-1.5">
-                                  <button 
-                                    onClick={() => {
-                                      setExamScheduleForm({
-                                        examName: sched.examName,
-                                        class: sched.class,
-                                        subject: sched.subject,
-                                        date: sched.date,
-                                        startTime: sched.startTime,
-                                        endTime: sched.endTime,
-                                        totalMarks: sched.totalMarks,
-                                        roomNo: sched.roomNo
-                                      });
-                                      setExamScheduleModal({ open: true, editItem: sched });
-                                    }}
-                                    className="p-1 px-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[11px] font-bold"
-                                  >
-                                    تبدیل کریں / Edit
-                                  </button>
-                                  <button 
-                                    onClick={() => handleDeleteExamSchedule(sched.id)}
-                                    className="p-1 px-2.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg text-[11px] font-bold"
-                                  >
-                                    حذف / Delete
-                                  </button>
-                                </div>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {filteredSchedules.length === 0 ? (
+                            <tr>
+                              <td colSpan={8} className="py-12 text-center text-slate-400 space-y-3">
+                                <Calendar className="h-10 w-10 mx-auto text-slate-300 stroke-1" />
+                                <p className="font-semibold text-slate-600">کوئی امتحانی شیڈول تاحال موجود نہیں ہے</p>
+                                <p className="text-[11px] text-slate-400">نیا شیڈول بنانے کے لیے اوپر موجود بٹن پر کلک کریں</p>
                               </td>
                             </tr>
-                          ))
-                        )}
-                      </tbody>
-                    </table>
+                          ) : (
+                            filteredSchedules.map(sched => (
+                              <tr key={sched.id} className="hover:bg-slate-50/60 font-medium transition-colors">
+                                <td className="py-4 px-4 font-bold text-slate-800 text-right">{sched.examName}</td>
+                                <td className="py-4 px-4 text-center"><span className="px-2 py-1 bg-indigo-50 text-indigo-700 rounded-md font-sans font-bold">{sched.class}</span></td>
+                                <td className="py-4 px-4 text-center text-slate-700 font-bold">{sched.subject}</td>
+                                <td className="py-4 px-4 text-center font-sans font-semibold text-slate-600">{sched.date}</td>
+                                <td className="py-4 px-4 text-center font-sans font-semibold text-slate-500">{sched.startTime} - {sched.endTime}</td>
+                                <td className="py-4 px-4 text-center text-slate-600 font-sans font-semibold">{sched.roomNo || 'N/A'}</td>
+                                <td className="py-4 px-4 text-center font-sans font-bold text-emerald-600 font-sans">{sched.totalMarks || 100}</td>
+                                <td className="py-4 px-4">
+                                  <div className="flex items-center justify-center gap-1.5">
+                                    <button 
+                                      onClick={() => {
+                                        setExamScheduleForm({
+                                          examName: sched.examName,
+                                          class: sched.class,
+                                          subject: sched.subject,
+                                          date: sched.date,
+                                          startTime: sched.startTime,
+                                          endTime: sched.endTime,
+                                          totalMarks: sched.totalMarks,
+                                          roomNo: sched.roomNo
+                                        });
+                                        setExamScheduleModal({ open: true, editItem: sched });
+                                      }}
+                                      className="p-1 px-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[11px] font-bold cursor-pointer"
+                                    >
+                                      تبدیل کریں / Edit
+                                    </button>
+                                    <button 
+                                      onClick={() => handleDeleteExamSchedule(sched.id)}
+                                      className="p-1 px-2.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg text-[11px] font-bold cursor-pointer"
+                                    >
+                                      حذف / Delete
+                                    </button>
+                                  </div>
+                                </td>
+                              </tr>
+                            ))
+                          )}
+                        </tbody>
+                      </table>
+                    </div>
                   </div>
                 </div>
-              </div>
-            )}
+              );
+            })()}
 
 
             {/* MODULE 10: SETTINGS */}
@@ -2942,6 +3122,111 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
         </div>
       )}
 
+      {/* ==================================================================== */}
+      {/* PRINT DIALOG: EXAM DATE SHEET POPUP */}
+      {activeDateSheetClass && (() => {
+        const dateSheetItems = examSchedules
+          .filter(item => activeDateSheetClass === 'All Classes' || item.class === activeDateSheetClass)
+          .sort((a, b) => new Date(a.date).getTime() - new Date(b.date).getTime());
+
+        return (
+          <div className="fixed inset-0 z-50 bg-white md:bg-slate-900/60 overflow-y-auto flex items-center justify-center p-0 md:p-6" id="date-sheet-overlay">
+            <div className="bg-white max-w-2xl w-full p-8 md:rounded-3xl shadow-2xl relative text-right font-sans border-2 flex flex-col justify-between animate-in fade-in-50 duration-200" id="printable-datesheet-body">
+              
+              <div className="flex justify-between items-center pb-4 border-b mb-6 no-print">
+                <button 
+                  onClick={() => window.print()}
+                  className="px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white font-extrabold text-xs rounded-xl flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <Printer className="h-4 w-4" />
+                  <span>ڈیٹ شیٹ پرنٹ کریں / Print Date Sheet</span>
+                </button>
+                
+                <button onClick={() => setActiveDateSheetClass(null)} className="p-1.5 rounded-full text-slate-400 hover:bg-slate-100 cursor-pointer">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="space-y-6">
+                {profile?.logoUrl && (
+                  <div className="flex justify-center mb-1">
+                    <img src={profile.logoUrl} alt="School Logo" className="h-16 w-16 object-contain rounded-full border border-slate-100 p-1" referrerPolicy="no-referrer" />
+                  </div>
+                )}
+
+                <div className="text-center space-y-1">
+                  <h2 className="text-xl font-black text-[#0f1b3d]">{profile?.name || 'School ERP'}</h2>
+                  <h3 className="text-xs uppercase font-extrabold text-[#00c896] tracking-wider bg-emerald-50 px-3 py-1.5 rounded-lg inline-block">امتحانی نظام الاوقات (ڈیٹ شیٹ) / Official Exam Date Sheet</h3>
+                  {activeDateSheetClass !== 'All Classes' && (
+                    <p className="text-xs font-bold text-slate-700 mt-2">کلاس / Class: <span className="text-indigo-700 font-extrabold">{activeDateSheetClass}</span></p>
+                  )}
+                </div>
+
+                <div className="overflow-x-auto rounded-xl border border-slate-200">
+                  <table className="w-full text-right text-xs">
+                    <thead>
+                      <tr className="bg-slate-50 font-bold border-b border-slate-200 text-slate-700">
+                        <th className="py-3 px-4 text-right">تاریخ / Date</th>
+                        <th className="py-3 px-4 text-center font-bold">دن / Day</th>
+                        <th className="py-3 px-4 text-center font-bold">کلاس / Class</th>
+                        <th className="py-3 px-4 text-center font-bold">پرچہ / Subject</th>
+                        <th className="py-3 px-4 text-center font-bold">وقت / Timing</th>
+                        <th className="py-3 px-4 text-center font-bold">کمرہ نمبر / Room</th>
+                        <th className="py-3 px-4 text-center font-bold">نمبرات / Marks</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100 text-slate-800 font-semibold font-sans">
+                      {dateSheetItems.length === 0 ? (
+                        <tr>
+                          <td colSpan={7} className="py-8 text-center text-slate-400">کوئی امتحانی شیڈول تاحال موجود نہیں ہے</td>
+                        </tr>
+                      ) : (
+                        dateSheetItems.map((sched, index) => {
+                          const schedDate = new Date(sched.date);
+                          const dayName = schedDate.toLocaleDateString('ur-PK', { weekday: 'long' }) + ' / ' + schedDate.toLocaleDateString('en-US', { weekday: 'long' });
+                          return (
+                            <tr key={index} className="hover:bg-slate-50/40">
+                              <td className="py-3.5 px-4 font-mono text-right text-slate-600">{sched.date}</td>
+                              <td className="py-3.5 px-4 text-center text-[10px] text-slate-500">{dayName}</td>
+                              <td className="py-3.5 px-4 text-center"><span className="px-1.5 py-0.5 bg-indigo-50 text-indigo-700 rounded text-[10px] font-sans font-bold">{sched.class}</span></td>
+                              <td className="py-3.5 px-4 text-center text-slate-850 font-bold">{sched.subject}</td>
+                              <td className="py-3.5 px-4 text-center font-sans font-semibold">{sched.startTime} - {sched.endTime}</td>
+                              <td className="py-3.5 px-4 text-center text-slate-500 font-mono">{sched.roomNo || 'N/A'}</td>
+                              <td className="py-3.5 px-4 text-center font-mono font-bold text-emerald-600">{sched.totalMarks || 100}</td>
+                            </tr>
+                          );
+                        })
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-xs pt-4 text-slate-600 font-bold text-right">
+                  <div className="border border-dashed p-3 rounded-xl space-y-1 bg-slate-50 text-right">
+                    <p className="text-[#0f1b3d] font-extrabold text-[11px] text-right">امیدواروں کے لیے اہم ہدایات / Important Instructions:</p>
+                    <ul className="list-decimal list-inside text-[10px] text-slate-500 space-y-1 leading-relaxed text-right">
+                      <li>تمام طلباء کا امتحانی کارڈ ہمراہ لانا لازمی ہے۔</li>
+                      <li>امتحان شروع ہونے سے ۱۵ منٹ قبل رپورٹ کریں۔</li>
+                      <li>موبائل فون یا ممنوعہ الیکٹرانک اشیاء لانا سخت منع ہے۔</li>
+                    </ul>
+                  </div>
+
+                  <div className="flex flex-col justify-end items-center pb-2 border border-dashed rounded-xl p-3 bg-slate-50">
+                    <div className="w-28 border-b-2 border-slate-300 h-8"></div>
+                    <span className="text-[10px] text-slate-500 mt-2 font-black">دستخط پرنسپل / Principal Signature</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="pt-8 text-center text-[10px] font-bold text-slate-400 space-y-1 border-t mt-6">
+                <p>مصدقہ اسکول مینجمنٹ پورٹل ڈیٹ شیٹ — برائے سالانہ / میعاد امتحانات ۲۰۲۶</p>
+                <p className="no-print">© {t('appName')}</p>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
+
       {/* EXAM SCHEDULE ADD/EDIT MODAL OVERLAY */}
       {examScheduleModal.open && (
         <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 flex items-center justify-center p-4">
@@ -3063,6 +3348,140 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
                   className="px-5 py-2.5 bg-[#0f1b3d] hover:bg-opacity-90 text-[#00c896] font-bold text-xs rounded-xl"
                 >
                   محفوظ کریں / Save Schedule
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* BULK EXAM SCHEDULE MODAL OVERLAY */}
+      {bulkExamScheduleModal && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-2xl w-full p-6 md:p-8 border shadow-2xl relative text-right">
+            <button onClick={() => setBulkExamScheduleModal(false)} className="absolute top-4 left-4 p-1 rounded-full text-slate-400 hover:bg-slate-100">
+              <X className="h-5 w-5" />
+            </button>
+
+            <h3 className="font-bold text-[#0f1b3d] text-base mb-2 text-center flex items-center justify-center gap-2">
+              <Sparkles className="h-5 w-5 text-emerald-600" />
+              <span>ایک ساتھ تمام کلاسز کا امتحان شیڈول کریں / Create Bulk Exam Schedule</span>
+            </h3>
+            <p className="text-xs text-slate-400 text-center mb-6">ایک ہی بار میں آپ اپنی منتخب کردہ تمام کلاسوں کے لیے امتحانی نظام الاوقات تیار کر سکتے ہیں</p>
+            
+            <form onSubmit={handleSaveBulkExamSchedule} className="space-y-5">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500 text-right block">امتحان کا نام / Exam name (e.g. Final Exams) *</label>
+                  <input 
+                    type="text" 
+                    value={bulkExamForm.examName}
+                    onChange={(e) => setBulkExamForm(prev => ({ ...prev, examName: e.target.value }))}
+                    className="w-full text-xs font-semibold p-3 bg-slate-50 border rounded-xl outline-none focus:bg-white focus:border-indigo-400 text-right font-sans"
+                    placeholder="مثال: Final Exams 2026"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500 text-right block">شروع کرنے کی تاریخ / Start Date *</label>
+                  <input 
+                    type="date" 
+                    value={bulkExamForm.startDate}
+                    onChange={(e) => setBulkExamForm(prev => ({ ...prev, startDate: e.target.value }))}
+                    className="w-full text-xs font-bold font-sans p-3 bg-slate-50 border rounded-xl outline-none focus:bg-white focus:border-indigo-400 text-right"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1 md:col-span-2">
+                  <label className="text-xs font-bold text-slate-500 text-right block">مضامین / پرچوں کی فہرست (کوما سے الگ کریں) / Subjects List (Comma separated) *</label>
+                  <textarea 
+                    value={bulkExamForm.subjects}
+                    onChange={(e) => setBulkExamForm(prev => ({ ...prev, subjects: e.target.value }))}
+                    rows={3}
+                    className="w-full text-xs font-bold p-3 bg-slate-50 border rounded-xl outline-none focus:bg-white focus:border-indigo-400 text-right leading-relaxed font-sans"
+                    placeholder="مثال: English, Urdu, Mathematics, Science, Islamiat, Computer"
+                    required
+                  />
+                  <span className="text-[10px] text-slate-400 block text-right">ہر مضمون الگ دن پر شیڈول ہوگا، اتوار کا دن خود بخود چھوڑ دیا جائے گا</span>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500 text-right block">شروع وقت / Start Time *</label>
+                  <input 
+                    type="time" 
+                    value={bulkExamForm.startTime}
+                    onChange={(e) => setBulkExamForm(prev => ({ ...prev, startTime: e.target.value }))}
+                    className="w-full text-xs font-bold font-sans p-3 bg-slate-50 border rounded-xl outline-none focus:bg-white focus:border-indigo-400 text-right"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500 text-right block">ختم وقت / End Time *</label>
+                  <input 
+                    type="time" 
+                    value={bulkExamForm.endTime}
+                    onChange={(e) => setBulkExamForm(prev => ({ ...prev, endTime: e.target.value }))}
+                    className="w-full text-xs font-bold font-sans p-3 bg-slate-50 border rounded-xl outline-none focus:bg-white focus:border-indigo-400 text-right"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500 text-right block">کُل نمبرات / Total Marks *</label>
+                  <input 
+                    type="number" 
+                    value={bulkExamForm.totalMarks}
+                    onChange={(e) => setBulkExamForm(prev => ({ ...prev, totalMarks: parseInt(e.target.value) || 100 }))}
+                    className="w-full text-xs font-bold font-sans p-3 bg-slate-50 border rounded-xl outline-none focus:bg-white focus:border-indigo-400 text-right"
+                    required
+                  />
+                </div>
+              </div>
+
+              {/* Class selector checklist */}
+              <div className="space-y-2 border-t pt-3">
+                <label className="text-xs font-bold text-indigo-950 text-right block">کلاسز منتخب کریں / Target Classes *</label>
+                <div className="grid grid-cols-2 sm:grid-cols-5 gap-2 text-right">
+                  {['Class 1', 'Class 2', 'Class 3', 'Class 4', 'Class 5', 'Class 6', 'Class 7', 'Class 8', 'Class 9', 'Class 10'].map(cls => {
+                    const isChecked = bulkExamForm.classes.includes(cls);
+                    return (
+                      <label key={cls} className={`flex items-center justify-between p-2 rounded-xl border text-xs font-bold cursor-pointer transition-all ${isChecked ? 'bg-indigo-50 border-indigo-200 text-indigo-950' : 'bg-slate-50 text-slate-400 border-slate-100 hover:bg-slate-100'}`}>
+                        <input 
+                          type="checkbox"
+                          checked={isChecked}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setBulkExamForm(prev => ({ ...prev, classes: [...prev.classes, cls] }));
+                            } else {
+                              setBulkExamForm(prev => ({ ...prev, classes: prev.classes.filter(c => c !== cls) }));
+                            }
+                          }}
+                          className="h-3 w-3 accent-indigo-600 rounded-md"
+                        />
+                        <span>{cls}</span>
+                      </label>
+                    );
+                  })}
+                </div>
+              </div>
+
+              <div className="pt-4 flex gap-3 justify-end border-t">
+                <button 
+                  type="button" 
+                  onClick={() => setBulkExamScheduleModal(false)}
+                  className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl"
+                >
+                  منسوخ کریں / Cancel
+                </button>
+                <button 
+                  type="submit" 
+                  className="px-6 py-2.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-700 hover:to-teal-700 text-white font-extrabold text-xs rounded-xl shadow-md transition-all flex items-center gap-1.5"
+                >
+                  <Sparkles className="h-4 w-4" />
+                  <span>سب کلاسز کا شیڈول جنریٹ کریں / Generate All Schedules</span>
                 </button>
               </div>
             </form>
