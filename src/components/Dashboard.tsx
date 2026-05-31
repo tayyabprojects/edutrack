@@ -96,6 +96,7 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
     name: '', fatherName: '', class: 'Class 1', rollNo: '', dob: '', address: '', phone: '', gender: 'Male'
   });
   const [feeForm, setFeeForm] = useState({ amount: 0, month: 'May 2026' });
+  const [feeSelectedMonth, setFeeSelectedMonth] = useState('May 2026');
   const [examForm, setExamForm] = useState({ examName: '', date: '2026-05-26', subjects: 'English, Mathematics, Science' });
   const [staffForm, setStaffForm] = useState({
     name: '', role: 'Teacher' as any, subject: '', phone: '', salary: 30000, joinDate: '2026-05-26', status: 'Active' as any
@@ -305,20 +306,54 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
 
   // CALCULATED VALUES
   const classesList = ['Class 1', 'Class 2', 'Class 3', 'Class 4', 'Class 5', 'Class 6', 'Class 7', 'Class 8', 'Class 9', 'Class 10'];
+  const feeMonthsOrder = [
+    "January 2026", "February 2026", "March 2026", "April 2026", "May 2026", "June 2026", 
+    "July 2026", "August 2026", "September 2026", "October 2026", "November 2026", "December 2026"
+  ];
+
+  const getStudentPastArrears = (studentId: string, targetMonth: string, studentClass: string) => {
+    const targetIndex = feeMonthsOrder.indexOf(targetMonth);
+    if (targetIndex <= 0) return 0;
+    
+    let arrears = 0;
+    for (let i = 0; i < targetIndex; i++) {
+      const prevMonth = feeMonthsOrder[i];
+      const prevRecord = fees.find(f => f.studentId === studentId && f.month === prevMonth);
+      if (prevRecord) {
+        arrears += prevRecord.balance;
+      } else {
+        const classFee = profile?.classFees?.[studentClass] || 2500;
+        arrears += classFee;
+      }
+    }
+    return arrears;
+  };
   
   // STATS
   const totalStudentsCount = students.length;
   const staffCountTotal = staff.length;
   
-  const totalCollectedCurrentMonth = fees
-    .filter(f => f.month === 'May 2026')
-    .reduce((acc, current) => acc + current.paid, 0);
+  const totalCollectedCurrentMonth = students.reduce((acc, st) => {
+    const record = fees.find(f => f.studentId === st.id && f.month === feeSelectedMonth);
+    return acc + (record ? record.paid : 0);
+  }, 0);
 
-  const totalPendingCurrentMonth = fees
-    .filter(f => f.month === 'May 2026')
-    .reduce((acc, current) => acc + current.balance, 0);
+  const totalPendingCurrentMonth = students.reduce((acc, st) => {
+    const standardFee = profile?.classFees?.[st.class] || 2500;
+    const pastArrears = getStudentPastArrears(st.id, feeSelectedMonth, st.class);
+    const totalDue = standardFee + pastArrears;
+    const record = fees.find(f => f.studentId === st.id && f.month === feeSelectedMonth);
+    return acc + (record ? record.balance : totalDue);
+  }, 0);
 
-  const defaultersCount = fees.filter(f => f.balance > 0).length;
+  const defaultersCount = students.filter(st => {
+    const standardFee = profile?.classFees?.[st.class] || 2500;
+    const pastArrears = getStudentPastArrears(st.id, feeSelectedMonth, st.class);
+    const totalDue = standardFee + pastArrears;
+    const record = fees.find(f => f.studentId === st.id && f.month === feeSelectedMonth);
+    const balance = record ? record.balance : totalDue;
+    return balance > 0;
+  }).length;
 
   // Dynamic financial helpers based on staff designation searches
   const getStaffRole = (staffId: string) => {
@@ -671,9 +706,16 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
   // FEE COLLECTION LOGIC
   const handleOpenFeeCollectModal = (st: Student) => {
     const currentClassFee = profile?.classFees?.[st.class] || 2500;
+    const pastArrears = getStudentPastArrears(st.id, feeSelectedMonth, st.class);
+    const totalDue = currentClassFee + pastArrears;
+    
+    // If they already paid some part, prefill the remaining balance
+    const existingRecord = fees.find(f => f.studentId === st.id && f.month === feeSelectedMonth);
+    const remainingToPay = existingRecord ? existingRecord.balance : totalDue;
+
     setFeeForm({
-      amount: currentClassFee,
-      month: 'May 2026'
+      amount: remainingToPay,
+      month: feeSelectedMonth
     });
     setFeeModal({ open: true, student: st });
   };
@@ -687,14 +729,24 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
     const feeRef = doc(db, 'schools', schoolId, 'fees', feeId);
 
     const defaultClassFee = profile?.classFees?.[feeModal.student.class] || 2500;
-    const receiptNo = `REC-${Date.now().toString().slice(-6)}`;
+    const pastArrears = getStudentPastArrears(sId, feeForm.month, feeModal.student.class);
+    const totalDue = defaultClassFee + pastArrears;
+
+    const existingRecord = fees.find(f => f.studentId === sId && f.month === feeForm.month);
+    
+    // Treat the input field as the payment being received now
+    const thisPaymentAmount = feeForm.amount; 
+    const totalPaidCumulative = (existingRecord ? existingRecord.paid : 0) + thisPaymentAmount;
+    const finalBalance = Math.max(0, totalDue - totalPaidCumulative);
+
+    const receiptNo = existingRecord?.receiptNo || `REC-${Date.now().toString().slice(-6)}`;
 
     const feeObj: FeeRecord = {
       id: feeId,
       studentId: sId,
-      amount: defaultClassFee,
-      paid: feeForm.amount,
-      balance: Math.max(0, defaultClassFee - feeForm.amount),
+      amount: totalDue,
+      paid: totalPaidCumulative,
+      balance: finalBalance,
       month: feeForm.month,
       receiptNo,
       paidDate: new Date().toISOString()
@@ -1786,70 +1838,107 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
                 <div className="grid grid-cols-1 sm:grid-cols-3 gap-6">
                   <div className="bg-white p-6 rounded-2xl border border-slate-200/60 shadow-sm flex items-center justify-between">
                     <div>
-                      <span className="text-xs font-bold text-slate-500 block mb-1">کل جمع شدہ فیس</span>
+                      <span className="text-xs font-bold text-slate-500 block mb-1">کل جمع شدہ فیس ({feeSelectedMonth})</span>
                       <span className="text-xl font-bold text-[#0f1b3d]">PKR {totalCollectedCurrentMonth}</span>
                     </div>
                   </div>
                   <div className="bg-white p-6 rounded-2xl border border-slate-200/60 shadow-sm flex items-center justify-between">
                     <div>
-                      <span className="text-xs font-bold text-slate-500 block mb-1">کل بقایا رقم</span>
+                      <span className="text-xs font-bold text-slate-500 block mb-1">کل بقایا واجبات ({feeSelectedMonth})</span>
                       <span className="text-xl font-bold text-red-600">PKR {totalPendingCurrentMonth}</span>
                     </div>
                   </div>
                   <div className="bg-white p-6 rounded-2xl border border-slate-200/60 shadow-sm flex items-center justify-between">
                     <div>
-                      <span className="text-xs font-bold text-slate-500 block mb-1">نادہندگان (Defaulters)</span>
+                      <span className="text-xs font-bold text-slate-500 block mb-1">نادہندگان (Defaulters in {feeSelectedMonth})</span>
                       <span className="text-xl font-bold text-rose-500">{defaultersCount} Students</span>
                     </div>
                   </div>
                 </div>
 
                 <div className="bg-white rounded-2xl border border-slate-200 overflow-hidden shadow-sm">
-                  <div className="p-4 bg-slate-50 border-b flex justify-between items-center">
-                    <span className="font-bold text-[#0f1b3d] text-sm">{t('feesSummary')}</span>
+                  <div className="p-4 bg-slate-50 border-b flex flex-wrap gap-4 justify-between items-center">
+                    <span className="font-bold text-[#0f1b3d] text-sm uppercase flex items-center gap-1.5">
+                      <span className="h-2 w-2 bg-emerald-500 rounded-full"></span>
+                      <span>فیس ریکارڈز بورڈ ({feeSelectedMonth}) / Fees Record Dashboard</span>
+                    </span>
+                    
+                    <div className="flex items-center gap-2">
+                      <span className="text-xs font-bold text-slate-500">بلنگ مہینہ / Billing Month:</span>
+                      <select
+                        value={feeSelectedMonth}
+                        onChange={(e) => setFeeSelectedMonth(e.target.value)}
+                        className="p-2 py-1.5 text-xs font-bold bg-white border border-slate-300 hover:border-slate-400 rounded-xl outline-none cursor-pointer text-indigo-950 font-sans shadow-xs transition-colors"
+                      >
+                        {feeMonthsOrder.map(mon => (
+                          <option key={mon} value={mon}>{mon}</option>
+                        ))}
+                      </select>
+                    </div>
                   </div>
 
                   <div className="overflow-x-auto text-xs text-right">
                     <table className="w-full text-right text-xs">
                       <thead>
-                        <tr className="border-b border-slate-100 text-slate-400 bg-slate-50/70">
-                          <th className="py-3 px-4">رول نمبر</th>
-                          <th className="py-3 px-4">طالب علم کا نام</th>
-                          <th className="py-3 px-4">کلاس</th>
-                          <th className="py-3 px-4">مقررہ فیس (Due)</th>
-                          <th className="py-3 px-4">وصول شدہ (Paid)</th>
-                          <th className="py-3 px-4">بقایا واجب (Balance)</th>
-                          <th className="py-3 px-4">کارروائی (Action)</th>
+                        <tr className="border-b border-slate-100 text-slate-500 bg-slate-50/70 font-semibold">
+                          <th className="py-3.5 px-4 text-right">رول نمبر / Roll #</th>
+                          <th className="py-3.5 px-4 text-right">طلبہ کا نام / Student Name</th>
+                          <th className="py-3.5 px-4 text-center">کلاس / Class</th>
+                          <th className="py-3.5 px-4 text-center">موجودہ مہینہ فیس / Current Fee</th>
+                          <th className="py-3.5 px-4 text-center text-amber-600 font-bold">پچھلا بقایا / Arrears</th>
+                          <th className="py-3.5 px-4 text-center font-bold text-[#0f1b3d]">کل قابل ادا / Total Due</th>
+                          <th className="py-3.5 px-4 text-center text-emerald-600 font-bold">وصول شدہ / Paid</th>
+                          <th className="py-3.5 px-4 text-center text-rose-600 font-bold">بقایا واجب / Remaining</th>
+                          <th className="py-3.5 px-4 text-center">کارروائی / Action</th>
                         </tr>
                       </thead>
-                      <tbody className="divide-y divide-slate-50">
+                      <tbody className="divide-y divide-slate-50 font-medium">
                         {students.map(st => {
-                          const studentFeeRecord = fees.find(f => f.studentId === st.id && f.month === 'May 2026');
+                          const studentFeeRecord = fees.find(f => f.studentId === st.id && f.month === feeSelectedMonth);
                           const standardFee = profile?.classFees?.[st.class] || 2500;
+                          const pastArrears = getStudentPastArrears(st.id, feeSelectedMonth, st.class);
+                          const totalDue = standardFee + pastArrears;
+                          
                           const paid = studentFeeRecord ? studentFeeRecord.paid : 0;
-                          const balance = studentFeeRecord ? studentFeeRecord.balance : standardFee;
+                          const balance = studentFeeRecord ? studentFeeRecord.balance : totalDue;
 
                           return (
-                            <tr key={st.id} className="hover:bg-slate-50/70">
-                              <td className="py-3.5 px-4 font-mono font-bold text-slate-500">{st.rollNo}</td>
-                              <td className="py-3.5 px-4 font-bold text-[#0f1b3d]">{st.name}</td>
-                              <td className="py-3.5 px-4">{st.class}</td>
-                              <td className="py-3.5 px-4">PKR {standardFee}</td>
-                              <td className="py-3.5 px-4 font-bold text-emerald-600">PKR {paid}</td>
-                              <td className="py-3.5 px-4 font-bold text-rose-600">PKR {balance}</td>
+                            <tr key={st.id} className="hover:bg-slate-50/60 transition-all">
+                              <td className="py-3.5 px-4 font-mono font-bold text-slate-500 text-right">{st.rollNo}</td>
+                              <td className="py-3.5 px-4 font-bold text-[#0f1b3d] text-right">{st.name}</td>
+                              <td className="py-3.5 px-4 text-center">
+                                <span className="px-2 py-0.5 bg-indigo-50 text-indigo-700 font-mono font-bold text-[10px] rounded-md">{st.class}</span>
+                              </td>
+                              <td className="py-3.5 px-4 text-center font-sans font-semibold text-slate-600">PKR {standardFee}</td>
+                              <td className="py-3.5 px-4 text-center text-amber-600 font-sans font-extrabold">PKR {pastArrears}</td>
+                              <td className="py-3.5 px-4 text-center font-sans font-black text-[#0f1b3d]">PKR {totalDue}</td>
+                              <td className="py-3.5 px-4 text-center font-sans font-extrabold text-emerald-600">PKR {paid}</td>
+                              <td className="py-3.5 px-4 text-center font-sans font-extrabold text-rose-600">PKR {balance}</td>
                               <td className="py-3.5 px-4">
-                                <div className="flex items-center gap-2">
+                                <div className="flex items-center justify-center gap-1.5">
                                   <button 
                                     onClick={() => handleOpenFeeCollectModal(st)}
-                                    className="px-3 py-1.5 bg-[#00c896] hover:bg-[#00b284] text-white font-bold text-[10px] rounded-lg text-center"
+                                    className="px-2.5 py-1.5 bg-[#00c896] hover:bg-[#00b284] text-white font-bold text-[10px] rounded-lg text-center cursor-pointer transition-all"
                                   >
-                                    فیس وصول کریں (Collect)
+                                    فیس وصول کریں / Collect
                                   </button>
                                   <button 
-                                    onClick={() => setActiveFeeVoucher({ student: st, record: studentFeeRecord || null })}
-                                    className="px-3 py-1.5 bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100 font-bold text-[10px] rounded-lg text-center"
+                                    onClick={() => {
+                                      const billingRecord = studentFeeRecord || {
+                                        id: `${st.id}_${feeSelectedMonth.replace(' ', '_')}`,
+                                        studentId: st.id,
+                                        amount: totalDue,
+                                        paid: 0,
+                                        balance: totalDue,
+                                        month: feeSelectedMonth,
+                                        receiptNo: 'N/A',
+                                        paidDate: 'N/A'
+                                      };
+                                      setActiveFeeVoucher({ student: st, record: billingRecord });
+                                    }}
+                                    className="px-2.5 py-1.5 bg-slate-100 hover:bg-slate-200 border border-slate-200 text-slate-700 font-bold text-[10px] rounded-lg text-center cursor-pointer transition-all"
                                   >
-                                    پرنٹ واؤچر (Voucher Slip)
+                                    پرنٹ واؤچر / Voucher Slip
                                   </button>
                                 </div>
                               </td>
@@ -2683,40 +2772,93 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
       )}
 
       {/* COLLECT FEE MODAL OVERLAY */}
-      {feeModal.open && feeModal.student && (
-        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-sm w-full p-6 border shadow-2xl relative text-right">
-            <button onClick={() => setFeeModal({ open: false })} className="absolute top-4 left-4 p-1 rounded-full text-slate-400 hover:bg-slate-100">
-              <X className="h-5 w-5" />
-            </button>
+      {feeModal.open && feeModal.student && (() => {
+        const currentMonthFee = profile?.classFees?.[feeModal.student.class] || 2500;
+        const arrears = getStudentPastArrears(feeModal.student.id, feeSelectedMonth, feeModal.student.class);
+        const totalDue = currentMonthFee + arrears;
+        const existingRecord = fees.find(f => f.studentId === feeModal.student.id && f.month === feeSelectedMonth);
+        const alreadyPaid = existingRecord ? existingRecord.paid : 0;
+        const balanceDue = Math.max(0, totalDue - alreadyPaid);
 
-            <h3 className="font-bold text-[#0f1b3d] text-lg mb-6 text-center">{t('collectFeeTitle')}</h3>
-            
-            <form onSubmit={handleSaveFee} className="space-y-4">
-              <div className="p-3 bg-slate-50 border rounded-xl">
-                <span className="text-xs text-slate-500 block mb-1">طالب علم کا نام</span>
-                <span className="text-base font-black text-[#0f1b3d]">{feeModal.student.name}</span>
-                <span className="text-xs block text-slate-400">Class: {feeModal.student.class} · Roll #{feeModal.student.rollNo}</span>
-              </div>
+        return (
+          <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 flex items-center justify-center p-4">
+            <div className="bg-white rounded-3xl max-w-sm w-full p-6 border shadow-2xl relative text-right">
+              <button onClick={() => setFeeModal({ open: false })} className="absolute top-4 left-4 p-1 rounded-full text-slate-400 hover:bg-slate-100 cursor-pointer">
+                <X className="h-5 w-5" />
+              </button>
 
-              <div className="space-y-1">
-                <label className="text-xs font-bold text-slate-500">پیک فیس بل من مئی (Amount in PKR)</label>
-                <input 
-                  type="number" 
-                  value={feeForm.amount}
-                  onChange={(e) => setFeeForm(prev => ({ ...prev, amount: Number(e.target.value) }))}
-                  className="w-full text-sm p-3 bg-slate-50 border rounded-xl outline-none font-bold font-sans text-center"
-                />
-              </div>
+              <h3 className="font-bold text-[#0f1b3d] text-lg mb-6 text-center">{t('collectFeeTitle')}</h3>
+              
+              <form onSubmit={handleSaveFee} className="space-y-4">
+                <div className="p-3 bg-indigo-50/60 border border-indigo-100 rounded-2xl">
+                  <span className="text-xs text-slate-500 block mb-1">طالب علم کا نام</span>
+                  <span className="text-base font-black text-[#0f1b3d]">{feeModal.student.name}</span>
+                  <span className="text-xs block text-indigo-700/85 font-semibold mt-0.5">Class: {feeModal.student.class} · Roll #{feeModal.student.rollNo}</span>
+                </div>
 
-              <div className="flex justify-start space-x-2 space-x-reverse pt-4 border-t">
-                <button type="submit" className="px-6 py-2.5 bg-[#00c896] hover:bg-[#00b284] text-white font-bold text-xs rounded-xl shadow-md cursor-pointer">{t('save')} فیس</button>
-                <button type="button" onClick={() => setFeeModal({ open: false })} className="px-6 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs rounded-xl">{t('cancel')}</button>
-              </div>
-            </form>
+                <div className="bg-slate-50 p-4 border rounded-2xl text-xs space-y-2">
+                  <div className="flex justify-between border-b pb-1.5 font-bold">
+                    <span className="text-slate-500">بلنگ مہینہ / Billing Month:</span>
+                    <span className="text-indigo-900 font-sans font-extrabold">{feeSelectedMonth}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-slate-500">موجودہ مہینہ فیس / Current Fee:</span>
+                    <span className="font-bold font-sans">PKR {currentMonthFee}</span>
+                  </div>
+                  <div className="flex justify-between text-amber-600 font-bold">
+                    <span>پچھلا بقایا / Past Arrears:</span>
+                    <span className="font-sans">PKR {arrears}</span>
+                  </div>
+                  <div className="flex justify-between border-t border-dashed pt-1.5 font-black text-slate-900">
+                    <span>کل واجب الادا / Total Due:</span>
+                    <span className="font-sans text-sm">PKR {totalDue}</span>
+                  </div>
+                  {alreadyPaid > 0 && (
+                    <>
+                      <div className="flex justify-between text-emerald-600 font-bold">
+                        <span>پہلے وصول شدہ / Paid Previously:</span>
+                        <span className="font-sans">PKR {alreadyPaid}</span>
+                      </div>
+                      <div className="flex justify-between border-t border-dashed pt-1.5 text-rose-600 font-bold">
+                        <span>باقی لازم الادا / Remaining Due:</span>
+                        <span className="font-sans">PKR {balanceDue}</span>
+                      </div>
+                    </>
+                  )}
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-700 block text-right">
+                    {alreadyPaid > 0 ? "مزید فیس وصول کریں / Record Additional Payment (PKR):" : "وصول کی جانے والی رقم / Fee Amount to Collect (PKR):"}
+                  </label>
+                  <input 
+                    type="number" 
+                    value={feeForm.amount}
+                    onChange={(e) => setFeeForm(prev => ({ ...prev, amount: Number(e.target.value) }))}
+                    className="w-full text-sm p-3 bg-white border border-[#00c896]/35 hover:border-[#00c896] focus:border-[#00c896] rounded-xl outline-none font-bold font-sans text-center transition-all shadow-xs"
+                    placeholder="رقم درج کریں..."
+                    required
+                  />
+                  <p className="text-[10px] text-slate-400 text-center leading-relaxed">
+                    {alreadyPaid > 0 
+                      ? "اضافی درج کی گئی رقم پہلے سے وصول شدہ رقم میں شامل ہو جائے گی۔" 
+                      : "فیس کی کل رقم درج کریں (مزید بقایا اگلی بار شامل ہو جائے گا)۔"}
+                  </p>
+                </div>
+
+                <div className="flex justify-start space-x-2 space-x-reverse pt-4 border-t">
+                  <button type="submit" className="px-6 py-2.5 bg-[#00c896] hover:bg-[#00b284] text-white font-extrabold text-xs rounded-xl shadow-md cursor-pointer transition-colors">
+                    فیس رجسٹر کریں / {alreadyPaid > 0 ? "Add Payment" : "Collect Fee"}
+                  </button>
+                  <button type="button" onClick={() => setFeeModal({ open: false })} className="px-6 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-600 font-bold text-xs rounded-xl cursor-pointer">
+                    {t('cancel')}
+                  </button>
+                </div>
+              </form>
+            </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* CREATE EXAM MODAL */}
       {examModal && (
@@ -3052,75 +3194,96 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
 
       {/* ==================================================================== */}
       {/* PRINT DIALOG: STUDENT FEE VOUCHER POPUP */}
-      {activeFeeVoucher && (
-        <div className="fixed inset-0 z-50 bg-white md:bg-slate-900/60 overflow-y-auto flex items-center justify-center p-0 md:p-6" id="fee-voucher-overlay">
-          <div className="bg-white max-w-md w-full p-8 md:rounded-3xl shadow-2xl relative text-right font-sans border-2 flex flex-col justify-between animate-in fade-in-50 duration-200" id="printable-voucher-body">
-            
-            <div className="flex justify-between items-center pb-4 border-b mb-6 no-print">
-              <button 
-                onClick={() => window.print()}
-                className="px-4 py-2 bg-[#0f1b3d] text-white font-bold text-xs rounded-xl hover:bg-[#00c896] flex items-center gap-1.5"
-              >
-                <Printer className="h-4 w-4" />
-                <span>پرنٹ واؤچر / Print Voucher</span>
-              </button>
+      {activeFeeVoucher && (() => {
+        const standardFee = profile?.classFees?.[activeFeeVoucher.student.class] || 2500;
+        const billingMonth = activeFeeVoucher.record?.month || feeSelectedMonth;
+        const arrears = getStudentPastArrears(activeFeeVoucher.student.id, billingMonth, activeFeeVoucher.student.class);
+        const totalDue = standardFee + arrears;
+        const paid = activeFeeVoucher.record?.paid || 0;
+        const balanceDue = activeFeeVoucher.record ? activeFeeVoucher.record.balance : totalDue;
+
+        return (
+          <div className="fixed inset-0 z-50 bg-white md:bg-slate-900/60 overflow-y-auto flex items-center justify-center p-0 md:p-6" id="fee-voucher-overlay">
+            <div className="bg-white max-w-md w-full p-8 md:rounded-3xl shadow-2xl relative text-right font-sans border-2 flex flex-col justify-between animate-in fade-in-50 duration-200" id="printable-voucher-body">
               
-              <button onClick={() => setActiveFeeVoucher(null)} className="p-1.5 rounded-full text-slate-400 hover:bg-slate-100">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="space-y-6">
-              {/* Optional school brand logo */}
-              {profile?.logoUrl && (
-                <div className="flex justify-center mb-2">
-                  <img src={profile.logoUrl} alt="School Logo" className="h-16 w-16 object-contain rounded-full border border-slate-100 p-1" referrerPolicy="no-referrer" />
-                </div>
-              )}
-
-              <div className="text-center space-y-1">
-                <h2 className="text-xl font-extrabold text-[#0f1b3d]">{profile?.name}</h2>
-                <h3 className="text-xs uppercase font-bold text-[#00c896] tracking-widest">فیس ادائیگی رسید / Student Fee Slip</h3>
-                <span className="text-[10px] text-slate-400 block font-mono">Billing Month: May 2026</span>
-              </div>
-
-              <div className="p-3 bg-slate-50 rounded-xl space-y-2 text-xs text-slate-700">
-                <div>طالب علم کا نام/Student Name: <span className="font-bold text-[#0f1b3d]">{activeFeeVoucher.student.name}</span></div>
-                <div>رول نمبر/Roll No: <span className="font-mono font-bold">{activeFeeVoucher.student.rollNo}</span></div>
-                <div>کلاس/Class: <span className="font-bold">{activeFeeVoucher.student.class}</span></div>
-                <div>ولدیت/Father's Name: <span>{activeFeeVoucher.student.fatherName}</span></div>
-              </div>
-
-              <div className="space-y-2 text-xs border rounded-xl overflow-hidden animate-in">
-                <div className="flex justify-between p-3 bg-slate-50 font-bold text-slate-500">
-                  <span>تفصیلاتِ فیس</span>
-                  <span>رقم (PKR)</span>
-                </div>
+              <div className="flex justify-between items-center pb-4 border-b mb-6 no-print">
+                <button 
+                  onClick={() => window.print()}
+                  className="px-4 py-2 bg-[#0f1b3d] text-white font-bold text-xs rounded-xl hover:bg-[#00c896] flex items-center gap-1.5 cursor-pointer"
+                >
+                  <Printer className="h-4 w-4" />
+                  <span>پرنٹ واؤچر / Print Voucher</span>
+                </button>
                 
-                <div className="flex justify-between p-3">
-                  <span>مقررہ ماہانہ فیس (Monthly Tuition Fee)</span>
-                  <span className="font-mono">PKR {profile?.classFees?.[activeFeeVoucher.student.class] || 2500}</span>
+                <button onClick={() => setActiveFeeVoucher(null)} className="p-1.5 rounded-full text-slate-400 hover:bg-slate-100 cursor-pointer">
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+
+              <div className="space-y-6">
+                {/* Optional school brand logo */}
+                {profile?.logoUrl && (
+                  <div className="flex justify-center mb-2">
+                    <img src={profile.logoUrl} alt="School Logo" className="h-16 w-16 object-contain rounded-full border border-slate-100 p-1" referrerPolicy="no-referrer" />
+                  </div>
+                )}
+
+                <div className="text-center space-y-1">
+                  <h2 className="text-xl font-extrabold text-[#0f1b3d]">{profile?.name || 'School ERP'}</h2>
+                  <h3 className="text-xs uppercase font-bold text-[#00c896] tracking-widest bg-emerald-50 px-3 py-1 rounded inline-block">فیس ادائیگی رسید / Student Fee Slip</h3>
+                  <span className="text-xs text-indigo-700 block font-bold font-sans mt-1">بلنگ مہینہ / Billing Month: {billingMonth}</span>
                 </div>
 
-                <div className="flex justify-between p-3 border-t">
-                  <span>وصول شدہ رقم (Paid Amount)</span>
-                  <span className="font-mono text-emerald-600 font-bold">PKR {activeFeeVoucher.record?.paid || 0}</span>
+                <div className="p-3 bg-slate-50 border rounded-xl space-y-2 text-xs text-slate-705">
+                  <div className="grid grid-cols-2 gap-2 text-right">
+                    <div>طالب علم کا نام / Student: <span className="font-extrabold text-[#0f1b3d]">{activeFeeVoucher.student.name}</span></div>
+                    <div>ولدیت / Father Name: <span className="font-bold">{activeFeeVoucher.student.fatherName}</span></div>
+                    <div>رول نمبر / Roll #: <span className="font-mono font-bold text-slate-550">{activeFeeVoucher.student.rollNo}</span></div>
+                    <div>کلاس / Class: <span className="font-semibold text-indigo-700">{activeFeeVoucher.student.class}</span></div>
+                  </div>
                 </div>
 
-                <div className="flex justify-between p-3 border-t bg-slate-50">
-                  <span>بقایا واجب الادا (Remaining Balance)</span>
-                  <span className="font-mono text-rose-600 font-bold">PKR {activeFeeVoucher.record ? activeFeeVoucher.record.balance : (profile?.classFees?.[activeFeeVoucher.student.class] || 2500)}</span>
+                <div className="space-y-2 text-xs border rounded-xl overflow-hidden animate-in">
+                  <div className="flex justify-between p-3 bg-slate-50 font-bold text-slate-500">
+                    <span>تفصیلاتِ فیس / Fee Particulars</span>
+                    <span>رقم / Amount (PKR)</span>
+                  </div>
+                  
+                  <div className="flex justify-between p-3">
+                    <span>مقررہ ماہانہ ٹیوشن فیس (Monthly Tuition Fee)</span>
+                    <span className="font-bold font-sans">PKR {standardFee}</span>
+                  </div>
+
+                  <div className="flex justify-between p-3 border-t text-amber-600 font-bold">
+                    <span>سابقہ بقایا جات (Previous Arrears / Unpaid Dues)</span>
+                    <span className="font-sans">PKR {arrears}</span>
+                  </div>
+
+                  <div className="flex justify-between p-3 border-t font-black text-slate-900 bg-slate-50/50">
+                    <span>کل قابل ادا رقم (Total Amount Due)</span>
+                    <span className="font-sans">PKR {totalDue}</span>
+                  </div>
+
+                  <div className="flex justify-between p-3 border-t">
+                    <span>کل وصول شدہ رقم (Amount Paid)</span>
+                    <span className="font-sans text-emerald-600 font-extrabold">PKR {paid}</span>
+                  </div>
+
+                  <div className="flex justify-between p-3 border-t bg-slate-50/90">
+                    <span>حالیہ بقایا واجب (Net Remaining Balance)</span>
+                    <span className="font-mono text-rose-600 font-black text-sm">PKR {balanceDue}</span>
+                  </div>
                 </div>
               </div>
-            </div>
 
-            <div className="pt-8 text-center text-[10px] font-bold text-slate-400 space-y-1 border-t mt-6">
-              <p>کمپیوٹرائزڈ تیار کردہ اسکول ریکارڈ واؤچر — دستخط کی ضرورت نہیں</p>
-              <p className="no-print">© {t('appName')}</p>
+              <div className="pt-8 text-center text-[10px] font-bold text-slate-400 space-y-1 border-t mt-6">
+                <p>مصدقہ اسکول کمپیوٹرائزڈ فیس واؤچر — رسید کو سنبھال کر رکھیں</p>
+                <p className="no-print">© {t('appName')}</p>
+              </div>
             </div>
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* ==================================================================== */}
       {/* PRINT DIALOG: EXAM DATE SHEET POPUP */}
