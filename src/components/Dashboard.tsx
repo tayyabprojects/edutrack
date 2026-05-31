@@ -15,7 +15,8 @@ import {
 import { 
   GraduationCap, LogOut, Search, Plus, Trash2, Edit, Save, FileText, 
   UserPlus, DollarSign, Calendar, Users, Award, BookOpen, Layers, 
-  Sparkles, Settings, Menu, X, ArrowRight, Printer, AlertTriangle, CheckCircle, Globe, MessageSquare, Clock, Loader2
+  Sparkles, Settings, Menu, X, ArrowRight, Printer, AlertTriangle, CheckCircle, Globe, MessageSquare, Clock, Loader2,
+  Upload
 } from 'lucide-react';
 
 interface DashboardProps {
@@ -69,6 +70,7 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
   const [activeReportCard, setActiveReportCard] = useState<{ student: Student; examItem: ExamResult; record: any } | null>(null);
   const [activeSalarySlip, setActiveSalarySlip] = useState<{ staff: StaffMember; record: PayrollRecord } | null>(null);
   const [activeAiReportPrint, setActiveAiReportPrint] = useState<SavedAIReport | null>(null);
+  const [activeFeeVoucher, setActiveFeeVoucher] = useState<{ student: Student; record: FeeRecord | any } | null>(null);
 
   // Form Inputs Buffer
   const [studentForm, setStudentForm] = useState({
@@ -213,6 +215,16 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
       }, (err) => console.warn("Could not listen to complaints stream:", err))
     );
 
+    // Attendance overall history sync
+    const attendanceColRef = collection(db, 'schools', schoolId, 'attendance');
+    unsubscibers.push(
+      onSnapshot(attendanceColRef, (snap) => {
+        const list: AttendanceRecord[] = [];
+        snap.forEach(d => list.push({ id: d.id, ...d.data() } as AttendanceRecord));
+        setAttendance(list);
+      }, (err) => console.warn("Failed fetching overall attendance history", err))
+    );
+
     return () => unsubscibers.forEach(unsub => unsub());
   }, [schoolId]);
 
@@ -275,6 +287,68 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
     .reduce((acc, current) => acc + current.balance, 0);
 
   const defaultersCount = fees.filter(f => f.balance > 0).length;
+
+  // Dynamic financial helpers based on staff designation searches
+  const getStaffRole = (staffId: string) => {
+    const s = staff.find(itm => itm.id === staffId);
+    return s ? (s.designation || '').toLowerCase() : '';
+  };
+
+  // Student Fee earnings for May 2026
+  const feeEarningsMay26 = totalCollectedCurrentMonth;
+
+  // Utility and electricity expenses for May 2026
+  const electricityExpensesMay26 = expenses
+    .filter(e => e.date?.startsWith('2026-05') && (
+      (e.category || '').toLowerCase().includes('electricity') ||
+      (e.category || '').toLowerCase().includes('bill') ||
+      (e.category || '').toLowerCase().includes('utility') ||
+      (e.description || '').toLowerCase().includes('bill') ||
+      (e.description || '').toLowerCase().includes('electricity')
+    ))
+    .reduce((sum, item) => sum + (item.amount || 0), 0);
+
+  const otherExpensesMay26 = expenses
+    .filter(e => e.date?.startsWith('2026-05') && !(
+      (e.category || '').toLowerCase().includes('electricity') ||
+      (e.category || '').toLowerCase().includes('bill') ||
+      (e.category || '').toLowerCase().includes('utility') ||
+      (e.description || '').toLowerCase().includes('bill') ||
+      (e.description || '').toLowerCase().includes('electricity')
+    ))
+    .reduce((sum, item) => sum + (item.amount || 0), 0);
+
+  const totalSchoolExpensesMay26 = electricityExpensesMay26 + otherExpensesMay26;
+
+  // Payroll employee salaries breakdown for guard, teachers, peons
+  const teacherSalariesMay26 = payroll
+    .filter(p => p.month === 'May 2026' && p.status === 'Paid' && getStaffRole(p.staffId).includes('teacher'))
+    .reduce((sum, item) => sum + (item.net || item.basic || 0), 0);
+
+  const guardSalariesMay26 = payroll
+    .filter(p => p.month === 'May 2026' && p.status === 'Paid' && getStaffRole(p.staffId).includes('guard'))
+    .reduce((sum, item) => sum + (item.net || item.basic || 0), 0);
+
+  const peonSalariesMay26 = payroll
+    .filter(p => p.month === 'May 2026' && p.status === 'Paid' && (
+      getStaffRole(p.staffId).includes('peon') || 
+      getStaffRole(p.staffId).includes('naib qasid') ||
+      getStaffRole(p.staffId).includes('helper') ||
+      getStaffRole(p.staffId).includes('servant') ||
+      getStaffRole(p.staffId).includes('peils')
+    ))
+    .reduce((sum, item) => sum + (item.net || item.basic || 0), 0);
+
+  const otherSalariesMay26 = payroll
+    .filter(p => p.month === 'May 2026' && p.status === 'Paid' && 
+      !getStaffRole(p.staffId).includes('teacher') &&
+      !getStaffRole(p.staffId).includes('guard') &&
+      !(getStaffRole(p.staffId).includes('peon') || getStaffRole(p.staffId).includes('naib qasid') || getStaffRole(p.staffId).includes('helper') || getStaffRole(p.staffId).includes('servant') || getStaffRole(p.staffId).includes('peils'))
+    )
+    .reduce((sum, item) => sum + (item.net || item.basic || 0), 0);
+
+  const totalPayrollMay26 = teacherSalariesMay26 + guardSalariesMay26 + peonSalariesMay26 + otherSalariesMay26;
+  const netProfitLossMay26 = feeEarningsMay26 - (totalSchoolExpensesMay26 + totalPayrollMay26);
 
   // Recent Activity logger logs basic system stats changes
   const recentActivities = [
@@ -720,6 +794,85 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
     }
   };
 
+  const compressAndResizeLogo = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target?.result as string;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const MAX_WIDTH = 250;
+          const MAX_HEIGHT = 150;
+          let width = img.width;
+          let height = img.height;
+
+          if (width > height) {
+            if (width > MAX_WIDTH) {
+              height *= MAX_WIDTH / width;
+              width = MAX_WIDTH;
+            }
+          } else {
+            if (height > MAX_HEIGHT) {
+              width *= MAX_HEIGHT / height;
+              height = MAX_HEIGHT;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(event.target?.result as string);
+            return;
+          }
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(img, 0, 0, width, height);
+
+          const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.82);
+          resolve(compressedDataUrl);
+        };
+        img.onerror = (err) => reject(err);
+      };
+      reader.onerror = (err) => reject(err);
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleLogoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      const base64Logo = await compressAndResizeLogo(file);
+      await updateDoc(doc(db, 'schools', schoolId), { logoUrl: base64Logo });
+      triggerToast('اسکول کا لوگو کامیابی سے اپ لوڈ ہو گیا!');
+    } catch (err) {
+      console.error("Logo upload failed:", err);
+      triggerToast('Upload failed: ' + String(err), 'error');
+    }
+  };
+
+  const calculateStudentAttendancePercentage = (studentId: string): number => {
+    let presentDays = 0;
+    let totalDays = 0;
+    
+    attendance.forEach((att) => {
+      if (!att.records) return;
+      const item = att.records.find((r) => r.studentId === studentId);
+      if (item) {
+        totalDays++;
+        if (item.status === 'P' || item.status === 'L') {
+          presentDays++;
+        }
+      }
+    });
+
+    if (totalDays === 0) return 100; // default to 100%
+    return Math.round((presentDays / totalDays) * 100);
+  };
+
   // PROFILE SETTINGS & DANGER ZONE
   const [settingsBuffer, setSettingsBuffer] = useState({
     name: profile?.name || '',
@@ -967,6 +1120,104 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
                   </div>
                 </div>
 
+                {/* ADVANCED MONTHLY FINANCIAL STATEMENT LEDGER */}
+                <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6 space-y-6" id="dashboard-financial-ledger">
+                  <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b pb-4">
+                    <div className="space-y-1 text-right sm:text-left">
+                      <h3 className="font-extrabold text-[#0f1b3d] text-base">رواں ماہ کا مالیاتی حساب کتاب / School Financial Ledger</h3>
+                      <p className="text-xs text-slate-400">رواں مہینے کے اخراجات بقایا فیس اور ملازمین کی تنخواہیں</p>
+                    </div>
+                    
+                    <div className="text-right">
+                      <span className="text-xs font-bold text-slate-500 block">خالص بچت / Net Savings</span>
+                      <span className={`text-lg font-black font-sans px-3.5 py-1.5 rounded-xl border inline-block ${netProfitLossMay26 >= 0 ? 'bg-green-50 text-emerald-800 border-green-200' : 'bg-red-50 text-rose-805 border-red-200'}`}>
+                        PKR {netProfitLossMay26.toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+                    {/* Earning Card */}
+                    <div className="bg-[#f4f7ff]/70 border border-indigo-100/50 rounded-2xl p-5 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-indigo-900 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded-md">آمدنی / Fee Income</span>
+                        <DollarSign className="h-4 w-4 text-indigo-600" />
+                      </div>
+                      
+                      <div className="space-y-1">
+                        <span className="text-[10px] text-slate-400 block">طالب علموں سے حاصل شدہ کُل فیس (Students Earnings)</span>
+                        <span className="text-2xl font-black text-indigo-950 font-sans block">PKR {feeEarningsMay26.toLocaleString()}</span>
+                      </div>
+
+                      <div className="pt-2 text-xs text-slate-500 font-sans space-y-1 border-t border-dashed">
+                        <div className="flex justify-between">
+                          <span>طالب علموں کی تعداد:</span>
+                          <span className="font-bold">{totalStudentsCount}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* School Expenses Card */}
+                    <div className="bg-[#fff5f5]/70 border border-rose-100/50 rounded-2xl p-5 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-rose-900 bg-rose-50 border  border-rose-200 px-2 py-0.5 rounded-md">اخراجات / Expenses</span>
+                        <FileText className="h-4 w-4 text-rose-600" />
+                      </div>
+                      
+                      <div className="space-y-1">
+                        <span className="text-[10px] text-slate-400 block">اسکول کے بلز اور دیگر اخراجات (Electricity Bills & Misc)</span>
+                        <span className="text-2xl font-black text-rose-800 font-sans block">PKR {totalSchoolExpensesMay26.toLocaleString()}</span>
+                      </div>
+
+                      <div className="pt-2 text-xs text-slate-500 font-sans space-y-2 border-t border-dashed border-rose-100">
+                        <div className="flex justify-between">
+                          <span>بجلی کا بل (Electricity Utility):</span>
+                          <span className="font-bold font-sans text-rose-700">PKR {electricityExpensesMay26.toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>متفرق اخراجات (Other School Exp):</span>
+                          <span className="font-bold font-sans text-rose-700">PKR {otherExpensesMay26.toLocaleString()}</span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Employee Salaries Card */}
+                    <div className="bg-[#f0fdf4]/70 border border-green-150/50 rounded-2xl p-5 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <span className="text-xs font-bold text-emerald-900 bg-green-50 border border-green-200 px-2 py-0.5 rounded-md">ملازمین تنخواہیں / Payroll</span>
+                        <Users className="h-4 w-4 text-emerald-600" />
+                      </div>
+                      
+                      <div className="space-y-1">
+                        <span className="text-[10px] text-slate-400 block">ملازمین و اساتذہ کی کُل ادا شدہ تنخواہیں (Paid Salaries)</span>
+                        <span className="text-2xl font-black text-emerald-850 font-sans block">PKR {totalPayrollMay26.toLocaleString()}</span>
+                      </div>
+
+                      <div className="pt-2 text-xs text-slate-500 font-sans space-y-1.5 border-t border-dashed border-green-100">
+                        <div className="flex justify-between">
+                          <span>اساتذہ (Teachers Salary):</span>
+                          <span className="font-bold font-sans text-emerald-800">PKR {teacherSalariesMay26.toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>چوکیدار کی تنخواہ (Guard Salary):</span>
+                          <span className="font-bold font-sans text-emerald-800">PKR {guardSalariesMay26.toLocaleString()}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>نائب قاصد (Peon Salary):</span>
+                          <span className="font-bold font-sans text-emerald-800">PKR {peonSalariesMay26.toLocaleString()}</span>
+                        </div>
+                        {otherSalariesMay26 > 0 && (
+                          <div className="flex justify-between">
+                            <span>دیگر سٹاف (Other Staff):</span>
+                            <span className="font-bold font-sans text-emerald-800">PKR {otherSalariesMay26.toLocaleString()}</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+
+                  </div>
+                </div>
+
                 {/* Main Graph Grid */}
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
                   {/* Fee visual collection target */}
@@ -1080,6 +1331,7 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
                           <th className="py-3 px-4">ولدیت</th>
                           <th className="py-3 px-4">موبائل فون</th>
                           <th className="py-3 px-4">جنس</th>
+                          <th className="py-3 px-4 text-center">حاضری فیصدی (Attendance %)</th>
                           <th className="py-3 px-4">کارروائی</th>
                         </tr>
                       </thead>
@@ -1087,23 +1339,31 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
                         {students.filter(s => 
                           s.name.toLowerCase().includes(searchQuery.toLowerCase()) || 
                           s.rollNo.includes(searchQuery)
-                        ).map(st => (
-                          <tr key={st.id} className="hover:bg-slate-50/70">
-                            <td className="py-3.5 px-4 font-mono text-slate-500 font-bold">{st.rollNo}</td>
-                            <td className="py-3.5 px-4 font-bold text-[#0f1b3d]">{st.name}</td>
-                            <td className="py-3.5 px-4">{st.class}</td>
-                            <td className="py-3.5 px-4">{st.fatherName}</td>
-                            <td className="py-3.5 px-4 font-mono">{st.phone || '—'}</td>
-                            <td className="py-3.5 px-4">{st.gender}</td>
-                            <td className="py-3.5 px-4">
-                              <div className="flex items-center gap-2">
-                                <button onClick={() => handleOpenStudentModal(st)} className="text-blue-600 p-1 bg-blue-50 hover:bg-blue-100 rounded-lg"><Edit className="h-3.5 w-3.5" /></button>
-                                <button onClick={() => handleDeleteStudent(st.id)} className="text-red-500 p-1 bg-red-50 hover:bg-red-100 rounded-lg"><Trash2 className="h-3.5 w-3.5" /></button>
-                                <button onClick={() => handleOpenFeeCollectModal(st)} className="text-[#00c896] px-2 py-1 bg-emerald-50 hover:bg-emerald-100 font-extrabold text-[10px] rounded-lg">فیس وصول کریں</button>
-                              </div>
-                            </td>
-                          </tr>
-                        ))}
+                        ).map(st => {
+                          const attPercent = calculateStudentAttendancePercentage(st.id);
+                          return (
+                            <tr key={st.id} className="hover:bg-slate-50/70">
+                              <td className="py-3.5 px-4 font-mono text-slate-500 font-bold">{st.rollNo}</td>
+                              <td className="py-3.5 px-4 font-bold text-[#0f1b3d]">{st.name}</td>
+                              <td className="py-3.5 px-4">{st.class}</td>
+                              <td className="py-3.5 px-4">{st.fatherName}</td>
+                              <td className="py-3.5 px-4 font-mono">{st.phone || '—'}</td>
+                              <td className="py-3.5 px-4">{st.gender}</td>
+                              <td className="py-3.5 px-4 text-center">
+                                <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-black font-sans ${attPercent >= 75 ? 'bg-emerald-50 text-emerald-700 border border-emerald-200' : 'bg-rose-50 text-rose-700 border border-rose-200 shadow-xs'}`}>
+                                  {attPercent}%
+                                </span>
+                              </td>
+                              <td className="py-3.5 px-4">
+                                <div className="flex items-center gap-2">
+                                  <button onClick={() => handleOpenStudentModal(st)} className="text-blue-600 p-1 bg-blue-50 hover:bg-blue-100 rounded-lg"><Edit className="h-3.5 w-3.5" /></button>
+                                  <button onClick={() => handleDeleteStudent(st.id)} className="text-red-500 p-1 bg-red-50 hover:bg-red-100 rounded-lg"><Trash2 className="h-3.5 w-3.5" /></button>
+                                  <button onClick={() => handleOpenFeeCollectModal(st)} className="text-[#00c896] px-2 py-1 bg-emerald-50 hover:bg-emerald-100 font-extrabold text-[10px] rounded-lg">فیس وصول کریں</button>
+                                </div>
+                              </td>
+                            </tr>
+                          );
+                        })}
                       </tbody>
                     </table>
                   </div>
@@ -1248,12 +1508,20 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
                               <td className="py-3.5 px-4 font-bold text-emerald-600">PKR {paid}</td>
                               <td className="py-3.5 px-4 font-bold text-rose-600">PKR {balance}</td>
                               <td className="py-3.5 px-4">
-                                <button 
-                                  onClick={() => handleOpenFeeCollectModal(st)}
-                                  className="px-3 py-1.5 bg-[#00c896] hover:bg-[#00b284] text-white font-bold text-[10px] rounded-lg"
-                                >
-                                  فیس وصول کریں (Collect)
-                                </button>
+                                <div className="flex items-center gap-2">
+                                  <button 
+                                    onClick={() => handleOpenFeeCollectModal(st)}
+                                    className="px-3 py-1.5 bg-[#00c896] hover:bg-[#00b284] text-white font-bold text-[10px] rounded-lg text-center"
+                                  >
+                                    فیس وصول کریں (Collect)
+                                  </button>
+                                  <button 
+                                    onClick={() => setActiveFeeVoucher({ student: st, record: studentFeeRecord || null })}
+                                    className="px-3 py-1.5 bg-blue-50 border border-blue-200 text-blue-700 hover:bg-blue-100 font-bold text-[10px] rounded-lg text-center"
+                                  >
+                                    پرنٹ واؤچر (Voucher Slip)
+                                  </button>
+                                </div>
                               </td>
                             </tr>
                           );
@@ -1692,15 +1960,32 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
                         />
                       </div>
 
-                      <div className="space-y-1 col-span-1 sm:col-span-2">
-                        <label className="text-xs font-bold text-slate-500 block">{t('geminiKey')}</label>
-                        <input 
-                          type="password" 
-                          placeholder="AI Key is automatically populated, enter to override"
-                          value={settingsBuffer.geminiApiKey}
-                          onChange={(e) => setSettingsBuffer(prev => ({ ...prev, geminiApiKey: e.target.value }))}
-                          className="w-full text-sm p-3 bg-slate-50 border rounded-xl outline-none font-mono"
-                        />
+                      <div className="space-y-2 col-span-1 sm:col-span-2 border-t pt-4">
+                        <label className="text-xs font-bold text-slate-500 block">اسکول کا آفیشل لوگو / School Official Logo (سلپس اور فیس واؤچرز پر نمایاں کرنے کے لیے)</label>
+                        <div className="flex items-center gap-4 flex-wrap bg-[#f4f7ff]/50 p-4 rounded-2xl border border-indigo-100/50">
+                          {profile?.logoUrl ? (
+                            <img src={profile.logoUrl} alt="School Logo" className="h-16 max-w-[160px] object-contain bg-white border border-slate-200 rounded-xl p-1 shadow-sm" />
+                          ) : (
+                            <div className="bg-white h-16 w-32 rounded-xl flex items-center justify-center border border-dashed border-slate-350 text-[10px] font-bold text-slate-400">لوگو اپ لوڈ نہیں ہوا</div>
+                          )}
+                          <div className="space-y-1">
+                            <input 
+                              type="file" 
+                              accept="image/*" 
+                              id="school-logo-input" 
+                              className="hidden" 
+                              onChange={handleLogoUpload}
+                            />
+                            <label 
+                              htmlFor="school-logo-input" 
+                              className="px-4 py-2 bg-[#0f1b3d] hover:bg-[#00c896] text-white text-xs font-extrabold rounded-xl cursor-pointer shadow-md inline-flex items-center gap-1.5 transition active:scale-95 duration-100"
+                            >
+                              <Upload className="h-3.5 w-3.5" />
+                              <span>لوگو اپ لوڈ کریں / Upload Logo</span>
+                            </label>
+                            <span className="text-[10px] text-slate-400 block p-0.5">PNG یا Jpeg تصویر اپلوڈنگ کے دوران خودکار طور پر ری سائز ہوگی</span>
+                          </div>
+                        </div>
                       </div>
                     </div>
 
@@ -2266,6 +2551,12 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
             </div>
 
             <div className="space-y-6">
+              {profile?.logoUrl && (
+                <div className="flex justify-center mb-2">
+                  <img src={profile.logoUrl} alt="School Logo" className="h-16 w-16 object-contain rounded-full border border-slate-100 p-1" referrerPolicy="no-referrer" />
+                </div>
+              )}
+
               <div className="text-center space-y-1">
                 <h2 className="text-xl font-extrabold text-[#0f1b3d]">{profile?.name}</h2>
                 <h3 className="text-xs uppercase font-bold text-[#00c896] tracking-widest">ماہانہ ادائیگی تنخواہ سلپ / Salary Slip</h3>
@@ -2308,6 +2599,78 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
 
             <div className="pt-12 text-center text-[10px] font-bold text-slate-400 space-y-1">
               <p>کمپیوٹرائزڈ تیار کردہ سرکاری رسید — دستخط کی ضرورت نہیں</p>
+              <p className="no-print">© {t('appName')}</p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ==================================================================== */}
+      {/* PRINT DIALOG: STUDENT FEE VOUCHER POPUP */}
+      {activeFeeVoucher && (
+        <div className="fixed inset-0 z-50 bg-white md:bg-slate-900/60 overflow-y-auto flex items-center justify-center p-0 md:p-6" id="fee-voucher-overlay">
+          <div className="bg-white max-w-md w-full p-8 md:rounded-3xl shadow-2xl relative text-right font-sans border-2 flex flex-col justify-between animate-in fade-in-50 duration-200" id="printable-voucher-body">
+            
+            <div className="flex justify-between items-center pb-4 border-b mb-6 no-print">
+              <button 
+                onClick={() => window.print()}
+                className="px-4 py-2 bg-[#0f1b3d] text-white font-bold text-xs rounded-xl hover:bg-[#00c896] flex items-center gap-1.5"
+              >
+                <Printer className="h-4 w-4" />
+                <span>پرنٹ واؤچر / Print Voucher</span>
+              </button>
+              
+              <button onClick={() => setActiveFeeVoucher(null)} className="p-1.5 rounded-full text-slate-400 hover:bg-slate-100">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="space-y-6">
+              {/* Optional school brand logo */}
+              {profile?.logoUrl && (
+                <div className="flex justify-center mb-2">
+                  <img src={profile.logoUrl} alt="School Logo" className="h-16 w-16 object-contain rounded-full border border-slate-100 p-1" referrerPolicy="no-referrer" />
+                </div>
+              )}
+
+              <div className="text-center space-y-1">
+                <h2 className="text-xl font-extrabold text-[#0f1b3d]">{profile?.name}</h2>
+                <h3 className="text-xs uppercase font-bold text-[#00c896] tracking-widest">فیس ادائیگی رسید / Student Fee Slip</h3>
+                <span className="text-[10px] text-slate-400 block font-mono">Billing Month: May 2026</span>
+              </div>
+
+              <div className="p-3 bg-slate-50 rounded-xl space-y-2 text-xs text-slate-700">
+                <div>طالب علم کا نام/Student Name: <span className="font-bold text-[#0f1b3d]">{activeFeeVoucher.student.name}</span></div>
+                <div>رول نمبر/Roll No: <span className="font-mono font-bold">{activeFeeVoucher.student.rollNo}</span></div>
+                <div>کلاس/Class: <span className="font-bold">{activeFeeVoucher.student.class}</span></div>
+                <div>ولدیت/Father's Name: <span>{activeFeeVoucher.student.fatherName}</span></div>
+              </div>
+
+              <div className="space-y-2 text-xs border rounded-xl overflow-hidden animate-in">
+                <div className="flex justify-between p-3 bg-slate-50 font-bold text-slate-500">
+                  <span>تفصیلاتِ فیس</span>
+                  <span>رقم (PKR)</span>
+                </div>
+                
+                <div className="flex justify-between p-3">
+                  <span>مقررہ ماہانہ فیس (Monthly Tuition Fee)</span>
+                  <span className="font-mono">PKR {profile?.classFees?.[activeFeeVoucher.student.class] || 2500}</span>
+                </div>
+
+                <div className="flex justify-between p-3 border-t">
+                  <span>وصول شدہ رقم (Paid Amount)</span>
+                  <span className="font-mono text-emerald-600 font-bold">PKR {activeFeeVoucher.record?.paid || 0}</span>
+                </div>
+
+                <div className="flex justify-between p-3 border-t bg-slate-50">
+                  <span>بقایا واجب الادا (Remaining Balance)</span>
+                  <span className="font-mono text-rose-600 font-bold">PKR {activeFeeVoucher.record ? activeFeeVoucher.record.balance : (profile?.classFees?.[activeFeeVoucher.student.class] || 2500)}</span>
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-8 text-center text-[10px] font-bold text-slate-400 space-y-1 border-t mt-6">
+              <p>کمپیوٹرائزڈ تیار کردہ اسکول ریکارڈ واؤچر — دستخط کی ضرورت نہیں</p>
               <p className="no-print">© {t('appName')}</p>
             </div>
           </div>

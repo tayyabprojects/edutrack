@@ -17,6 +17,7 @@ export interface SchoolProfile {
   geminiApiKey?: string;
   classFees: { [key: string]: number };
   createdAt?: string;
+  logoUrl?: string;
 }
 
 export interface Student {

@@ -1,14 +1,14 @@
 import React, { useState, useEffect } from 'react';
 import { db, OperationType, handleFirestoreError } from '../lib/firebase';
 import { 
-  collection, getDocs, doc, setDoc, updateDoc, onSnapshot, query, orderBy
+  collection, getDocs, doc, setDoc, updateDoc, onSnapshot, query, orderBy, deleteDoc
 } from 'firebase/firestore';
 import { Language, SchoolProfile, Complaint } from '../types';
 import tayyabPortrait from '../assets/images/tayyab_real_final_beauty.png';
 import { 
   GraduationCap, LogOut, Users, MessageSquare, CheckCircle, Clock, 
   Search, ShieldAlert, Award, Globe, ToggleLeft, ToggleRight, Loader2, Sparkles, AlertTriangle, X,
-  Camera, Upload
+  Camera, Upload, Trash2, Send, Check, Ban
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -25,6 +25,12 @@ export default function AdminDashboard({ currentLang, onToggleLang, onLogout }: 
   const [activeTab, setActiveTab] = useState<'schools' | 'applications' | 'complaints'>('schools');
   
   const [customAvatar, setCustomAvatar] = useState<string | null>(null);
+
+  // Advanced features: school registered counts, admin messages, approval management
+  const [counts, setCounts] = useState<{ [schoolId: string]: { students: number; staff: number } }>({});
+  const [messageModal, setMessageModal] = useState<{ open: boolean; school: SchoolProfile | null }>({ open: false, school: null });
+  const [typedMessage, setTypedMessage] = useState('');
+  const [sendingMessage, setSendingMessage] = useState(false);
 
   // Sync custom avatar from global settings
   useEffect(() => {
@@ -222,6 +228,105 @@ export default function AdminDashboard({ currentLang, onToggleLang, onLogout }: 
       unsubComplaints();
     };
   }, []);
+
+  // Sync subcollection counts of students and staff members in real-time
+  useEffect(() => {
+    if (schools.length === 0) return;
+
+    const unsubs: (() => void)[] = [];
+
+    schools.forEach((s) => {
+      if (!s.schoolId) return;
+
+      const studCollection = collection(db, 'schools', s.schoolId, 'students');
+      const unsubStud = onSnapshot(studCollection, (snap) => {
+        setCounts(prev => ({
+          ...prev,
+          [s.schoolId!]: {
+            students: snap.size,
+            staff: prev[s.schoolId!]?.staff || 0
+          }
+        }));
+      }, (err) => console.warn(`Student count fail for ${s.schoolId}`, err));
+
+      const staffCollection = collection(db, 'schools', s.schoolId, 'staff');
+      const unsubStaff = onSnapshot(staffCollection, (snap) => {
+        setCounts(prev => ({
+          ...prev,
+          [s.schoolId!]: {
+            students: prev[s.schoolId!]?.students || 0,
+            staff: snap.size
+          }
+        }));
+      }, (err) => console.warn(`Staff count fail for ${s.schoolId}`, err));
+
+      unsubs.push(unsubStud, unsubStaff);
+    });
+
+    return () => {
+      unsubs.forEach((u) => u());
+    };
+  }, [schools]);
+
+  // Permanently delete a school structure from registry
+  const handleDeleteSchool = async (schoolId: string, name: string) => {
+    const isUr = currentLang === 'ur';
+    const msg = isUr 
+      ? `کیا آپ واقعی اسکول "${name}" کو سسٹم سے مستقل طور پر حذف کرنا چاہتے ہیں؟ اس سے ان کا سارا ڈیٹا غائب ہوجائے گا۔`
+      : `Are you absolutely sure you want to permanently delete "${name}" from EduTrack? This will wipe out all user records.`;
+    
+    if (!window.confirm(msg)) return;
+
+    try {
+      await deleteDoc(doc(db, 'schools', schoolId));
+      alert(isUr ? 'اسکول کامیابی سے حذف کر دیا گیا!' : 'School registry wiped out successfully.');
+    } catch (e) {
+      console.error(e);
+      alert('Failed: ' + String(e));
+    }
+  };
+
+  // Toggle school approval / system access (isApproved flag)
+  const handleToggleApproval = async (schoolId: string, currentApproval?: boolean) => {
+    const nextApproval = currentApproval === false;
+    try {
+      await updateDoc(doc(db, 'schools', schoolId), { isApproved: nextApproval });
+    } catch (e) {
+      console.error(e);
+      alert('Failed to register status check: ' + String(e));
+    }
+  };
+
+  // Dispatch live administrative systems bulletin to school complaints section
+  const handleSendAdminMessage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!messageModal.school || !typedMessage.trim()) return;
+    setSendingMessage(true);
+
+    try {
+      const msgId = `msg_${Date.now()}`;
+      await setDoc(doc(db, 'complaints', msgId), {
+        id: msgId,
+        schoolId: messageModal.school.schoolId,
+        schoolName: messageModal.school.name,
+        email: messageModal.school.email || 'partner@edutrack.com',
+        subject: 'اہم ایڈمنسٹریٹو پیغام / Direct Administrative Message',
+        description: typedMessage.trim(),
+        createdAt: new Date().toISOString(),
+        status: 'Resolved',
+        isAdminMessage: true
+      });
+
+      alert(currentLang === 'ur' ? 'ایڈمن کا پیغام اسکول کے ڈیش بورڈ پر روانہ کر دیا گیا ہے!' : 'Direct Administrative message successfully sent!');
+      setMessageModal({ open: false, school: null });
+      setTypedMessage('');
+    } catch (err) {
+      console.error(err);
+      alert('Failed: ' + String(err));
+    } finally {
+      setSendingMessage(false);
+    }
+  };
 
   // Update School Plan (Premium License vs Free Trial duration toggle)
   const handleTogglePlan = async (schoolId: string, currentPlan: 'free' | 'premium' | string | undefined) => {
@@ -572,6 +677,7 @@ export default function AdminDashboard({ currentLang, onToggleLang, onLogout }: 
           <section id="module-admin-main-panel">
             
             {/* TAB CONTAINER 1: REGISTERED SCHOOLS */}
+            {/* TAB CONTAINER 1: REGISTERED SCHOOLS */}
             {activeTab === 'schools' && (
               <div className="bg-white rounded-2xl border shadow-sm overflow-hidden" id="tab-registered-schools">
                 
@@ -581,23 +687,30 @@ export default function AdminDashboard({ currentLang, onToggleLang, onLogout }: 
                       <tr>
                         <th className="p-4">{str.schoolName}</th>
                         <th className="p-4">{str.owner}</th>
+                        <th className="p-4 text-center">رجسٹرڈ تعداد (Strengths)</th>
                         <th className="p-4">{str.city}</th>
                         <th className="p-4">{str.contact}</th>
                         <th className="p-4">{str.license}</th>
-                        <th className="p-4">{str.expiry}</th>
-                        <th className="p-4 text-center">Admin Controls</th>
+                        <th className="p-4 text-center">منظوری حیثیت (Approval)</th>
+                        <th className="p-4 text-center">کنٹرول پینل (Admin Actions)</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y text-slate-600 font-sans">
                       {filteredSchools.length === 0 ? (
                         <tr>
-                          <td colSpan={7} className="p-12 text-center text-slate-400 font-bold leading-relaxed">
+                          <td colSpan={8} className="p-12 text-center text-slate-400 font-bold leading-relaxed">
                             {str.noResults}
                           </td>
                         </tr>
                       ) : (
                         filteredSchools.map((s, index) => {
                           const isPremium = s.plan === 'premium';
+                          const isApproved = s.isApproved !== false; // defaults to true
+                          
+                          // Subcollection live counters
+                          const schoolStudentsCount = counts[s.schoolId!]?.students ?? 0;
+                          const schoolStaffCount = counts[s.schoolId!]?.staff ?? 0;
+
                           // Parse dates beautifully
                           const expiryDate = s.trialEndDate ? new Date(s.trialEndDate).toLocaleDateString() : 'N/A';
                           return (
@@ -610,6 +723,18 @@ export default function AdminDashboard({ currentLang, onToggleLang, onLogout }: 
                                 <span className="font-semibold text-slate-705 block">{s.ownerName || 'Representative'}</span>
                                 <span className="text-[10px] text-slate-400">{s.address || 'Address unprovided'}</span>
                               </td>
+                              <td className="p-4 text-center">
+                                <div className="inline-flex flex-col gap-1.5 p-2 bg-slate-50 rounded-xl border border-slate-100 min-w-32">
+                                  <div className="flex justify-between text-[11px]">
+                                    <span className="text-slate-400">طلبہ (Students):</span>
+                                    <span className="font-black text-[#0f1b3d] font-sans">{schoolStudentsCount}</span>
+                                  </div>
+                                  <div className="flex justify-between text-[11px]">
+                                    <span className="text-slate-400">عملہ (Staff):</span>
+                                    <span className="font-black text-indigo-700 font-sans">{schoolStaffCount}</span>
+                                  </div>
+                                </div>
+                              </td>
                               <td className="p-4">
                                 <span className="bg-slate-100 text-[#0f1b3d] px-2.5 py-1 rounded-md text-[10px] font-bold border">{s.city || 'Pakistan'}</span>
                               </td>
@@ -618,39 +743,74 @@ export default function AdminDashboard({ currentLang, onToggleLang, onLogout }: 
                                 <span className="text-[10px] text-indigo-600 font-mono font-medium block">{s.email || 'no-email@edutrack.com'}</span>
                               </td>
                               <td className="p-4">
-                                {isPremium ? (
-                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold rounded-full">
-                                    <Award className="h-3 w-3" />
-                                    <span>Premium SaaS Access</span>
+                                <div className="space-y-1">
+                                  {isPremium ? (
+                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-emerald-50 text-emerald-700 border border-emerald-200 text-[10px] font-bold rounded-full">
+                                      <Award className="h-3 w-3" />
+                                      <span>Premium SaaS</span>
+                                    </span>
+                                  ) : (
+                                    <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-bold rounded-full">
+                                      <Clock className="h-3 w-3" />
+                                      <span>Free Trial</span>
+                                    </span>
+                                  )}
+                                  <span className="text-[9px] text-slate-400 font-mono block">Ends: {expiryDate}</span>
+                                </div>
+                              </td>
+                              <td className="p-4 text-center">
+                                {isApproved ? (
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-green-500/10 text-emerald-700 border border-green-200 text-[10px] font-bold rounded-xl">
+                                    <Check className="h-3 w-3 text-emerald-600" />
+                                    <span>فعال / Approved</span>
                                   </span>
                                 ) : (
-                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-amber-50 text-amber-700 border border-amber-200 text-[10px] font-bold rounded-full">
-                                    <Clock className="h-3 w-3" />
-                                    <span>Demolink / Free Trial</span>
+                                  <span className="inline-flex items-center gap-1 px-2.5 py-1 bg-red-50 text-red-700 border border-red-200 text-[10px] font-bold rounded-xl animate-pulse">
+                                    <Ban className="h-3 w-3 text-red-500" />
+                                    <span>معطل / Suspended</span>
                                   </span>
                                 )}
                               </td>
-                              <td className="p-4 font-mono font-semibold">
-                                {expiryDate}
-                              </td>
                               <td className="p-4">
-                                <div className="flex justify-center">
+                                <div className="flex flex-wrap justify-center items-center gap-1.5 max-w-sm">
+                                  
+                                  {/* Toggle Plan button */}
                                   <button
                                     onClick={() => handleTogglePlan(s.schoolId || '', s.plan)}
-                                    className={`px-3 py-1.5 rounded-xl font-bold text-[10px] transition cursor-pointer flex items-center gap-1.5 ${isPremium ? 'bg-amber-100 hover:bg-amber-150 text-amber-700' : 'bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm shadow-emerald-500/10'}`}
+                                    title={isPremium ? 'Demote to Demo' : 'Promote to Premium'}
+                                    className={`px-2 py-1 rounded-lg font-bold text-[9px] transition cursor-pointer flex items-center gap-1 ${isPremium ? 'bg-amber-100 hover:bg-amber-200 text-amber-800' : 'bg-emerald-650 hover:bg-emerald-700 text-white shadow-sm'}`}
                                   >
-                                    {isPremium ? (
-                                      <>
-                                        <ToggleLeft className="h-3.5 w-3.5" />
-                                        <span>{str.freeBtn}</span>
-                                      </>
-                                    ) : (
-                                      <>
-                                        <ToggleRight className="h-3.5 w-3.5" />
-                                        <span>{str.premiumBtn}</span>
-                                      </>
-                                    )}
+                                    {isPremium ? 'Demote' : 'Promote'}
                                   </button>
+
+                                  {/* Toggle Approval Button */}
+                                  <button
+                                    onClick={() => handleToggleApproval(s.schoolId || '', s.isApproved !== false)}
+                                    title={isApproved ? 'Suspend School Access' : 'Approve School Access'}
+                                    className={`p-1.5 rounded-lg border font-bold text-[10px] font-sans transition cursor-pointer ${isApproved ? 'bg-red-50 text-red-600 hover:bg-red-100 border-red-200' : 'bg-green-550 text-white border-green-200'}`}
+                                  >
+                                    {isApproved ? 'Suspend' : 'Approve'}
+                                  </button>
+
+                                  {/* Send Message Button */}
+                                  <button
+                                    onClick={() => setMessageModal({ open: true, school: s })}
+                                    title="Send Bulletin Message to complaints section"
+                                    className="p-1 px-2 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-lg hover:bg-indigo-100 flex items-center gap-1 font-bold text-[9px]"
+                                  >
+                                    <MessageSquare className="h-3 w-3" />
+                                    <span>پیغام</span>
+                                  </button>
+
+                                  {/* Permanent Wiping out registry */}
+                                  <button
+                                    onClick={() => handleDeleteSchool(s.schoolId || '', s.name)}
+                                    title="Delete School Profile Permanently"
+                                    className="p-1.5 bg-rose-50 border border-rose-200 text-red-600 rounded-lg hover:bg-red-100 cursor-pointer"
+                                  >
+                                    <Trash2 className="h-3.5 w-3.5" />
+                                  </button>
+
                                 </div>
                               </td>
                             </tr>
@@ -907,6 +1067,68 @@ export default function AdminDashboard({ currentLang, onToggleLang, onLogout }: 
                 </button>
               </div>
             </form>
+
+          </div>
+        </div>
+      )}
+
+      {/* DIRECT SaaS BULLETIN MESSAGE MODAL FOR TAYYAB */}
+      {messageModal.open && messageModal.school && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/65 flex items-center justify-center p-4 backdrop-blur-xs">
+          <div className="bg-white rounded-3xl max-w-lg w-full p-8 border shadow-2xl relative text-right flex flex-col justify-between animate-in fade-in zoom-in-95 duration-200 animate-out fade-out zoom-out-95">
+            <button 
+              onClick={() => setMessageModal({ open: false, school: null })} 
+              className="absolute top-4 left-4 p-1 rounded-full text-slate-400 hover:bg-slate-100"
+            >
+              <X className="h-5 w-5" />
+            </button>
+
+            <div className="space-y-4 w-full">
+              <div className="flex items-center gap-2 justify-center pb-4 border-b">
+                <Send className="h-5 w-5 text-indigo-500" />
+                <h3 className="font-extrabold text-[#0f1b3d] text-lg text-center">
+                  اسکول کو براہِ راست پیغام بھیجیں / SaaS Bullet
+                </h3>
+              </div>
+
+              <div className="p-4 bg-indigo-50/50 rounded-2xl text-xs space-y-1 text-right text-indigo-950 font-sans border-2 border-dashed border-indigo-150">
+                <p>موصول کنندہ اسکول (To School): <span className="font-black text-indigo-900 text-sm block">{messageModal.school.name}</span></p>
+                <p>لوکیشن (City): <span className="font-bold">{messageModal.school.city}</span></p>
+                <p className="text-[10px] text-slate-400 font-mono">School Owner Account: {messageModal.school.ownerName || 'Representative'}</p>
+              </div>
+
+              <form onSubmit={handleSendAdminMessage} className="space-y-4">
+                <div className="space-y-1.5 text-right">
+                  <label className="text-xs font-bold text-slate-500 block">اپنا تفصیلی پیغام درج کریں (Administrative Message Body)</label>
+                  <textarea 
+                    rows={6}
+                    value={typedMessage}
+                    onChange={(e) => setTypedMessage(e.target.value)}
+                    placeholder="یہاں اپنا پیغام لکھیں، جو اسکول کے ڈیش بورڈ پر شکایات / اطلاعات سیکشن میں نظر آئے گا۔"
+                    className="w-full text-sm p-4 bg-slate-50 border rounded-xl outline-none font-sans focus:ring-2 focus:ring-[#00c896]"
+                    required
+                  />
+                </div>
+
+                <div className="flex justify-end gap-3 pt-3">
+                  <button 
+                    type="button" 
+                    onClick={() => setMessageModal({ open: false, school: null })}
+                    className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl cursor-pointer"
+                  >
+                    منسوخ کریں (Cancel)
+                  </button>
+                  <button 
+                    type="submit" 
+                    disabled={sendingMessage}
+                    className="px-5 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white font-bold text-xs rounded-xl cursor-pointer flex items-center gap-1.5 shadow-md shadow-indigo-500/10 hover:-translate-y-0.5 active:translate-y-0 transition duration-155"
+                  >
+                    {sendingMessage && <Loader2 className="h-3 w-3 animate-spin" />}
+                    <span>پیغام بھیجیں (Send message)</span>
+                  </button>
+                </div>
+              </form>
+            </div>
 
           </div>
         </div>
