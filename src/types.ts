@@ -129,3 +129,16 @@ export interface Complaint {
   repliedAt?: string;
 }
 
+export interface ExamScheduleItem {
+  id: string;
+  examName: string;
+  class: string;
+  subject: string;
+  date: string;
+  startTime: string;
+  endTime: string;
+  totalMarks: number;
+  roomNo: string;
+}
+
+

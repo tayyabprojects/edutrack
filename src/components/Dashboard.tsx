@@ -10,7 +10,7 @@ import {
   translations } from '../translations';
 import { 
   Language, Student, AttendanceRecord, FeeRecord, ExamResult, 
-  StaffMember, PayrollRecord, ExpenseRecord, SchoolProfile, SavedAIReport, Complaint 
+  StaffMember, PayrollRecord, ExpenseRecord, SchoolProfile, SavedAIReport, Complaint, ExamScheduleItem
 } from '../types';
 import { 
   GraduationCap, LogOut, Search, Plus, Trash2, Edit, Save, FileText, 
@@ -35,7 +35,7 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
   const isRTL = currentLang === 'ur';
 
   // Current active module/tab
-  const [activeModule, setActiveModule] = useState<'dashboard' | 'students' | 'attendance' | 'fees' | 'results' | 'staff' | 'payroll' | 'expenses' | 'reports' | 'settings' | 'complaints'>('dashboard');
+  const [activeModule, setActiveModule] = useState<'dashboard' | 'students' | 'attendance' | 'fees' | 'results' | 'staff' | 'payroll' | 'expenses' | 'settings' | 'complaints' | 'exams_schedule'>('dashboard');
   
   // Complaints and Support ticket states
   const [complaintsList, setComplaintsList] = useState<Complaint[]>([]);
@@ -52,12 +52,17 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
   const [payroll, setPayroll] = useState<PayrollRecord[]>([]);
   const [expenses, setExpenses] = useState<ExpenseRecord[]>([]);
   const [savedReports, setSavedReports] = useState<SavedAIReport[]>([]);
+  const [examSchedules, setExamSchedules] = useState<ExamScheduleItem[]>([]);
 
   // UI States
   const [loading, setLoading] = useState(true);
   const [alert, setAlert] = useState<{ message: string; type: 'success' | 'error' } | null>(null);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
+  const [examSearchQuery, setExamSearchQuery] = useState('');
+
+  // Ledger Select Filter Month (May 2026, Apr 2026, Jun 2026, etc)
+  const [ledgerSelectedMonth, setLedgerSelectedMonth] = useState('May 2026');
 
   // Modals state
   const [studentModal, setStudentModal] = useState<{ open: boolean; editItem?: Student | null }>({ open: false });
@@ -65,6 +70,8 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
   const [examModal, setExamModal] = useState<boolean>(false);
   const [staffModal, setStaffModal] = useState<{ open: boolean; editItem?: StaffMember | null }>({ open: false });
   const [expenseModal, setExpenseModal] = useState<boolean>(false);
+  const [examScheduleModal, setExamScheduleModal] = useState<{ open: boolean; editItem?: ExamScheduleItem | null }>({ open: false });
+
 
   // Active printable previews/slips
   const [activeReportCard, setActiveReportCard] = useState<{ student: Student; examItem: ExamResult; record: any } | null>(null);
@@ -83,6 +90,9 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
   });
   const [expenseForm, setExpenseForm] = useState({
     date: '2026-05-26', category: 'Utilities' as any, description: '', amount: 0
+  });
+  const [examScheduleForm, setExamScheduleForm] = useState({
+    examName: 'Final Exams 2026', class: 'Class 1', subject: 'English', date: '2026-06-05', startTime: '09:00', endTime: '12:00', totalMarks: 100, roomNo: 'Room A'
   });
 
   // Attendance tracker state
@@ -225,6 +235,16 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
       }, (err) => console.warn("Failed fetching overall attendance history", err))
     );
 
+    // Exam Schedule Sync
+    const examSchedColRef = collection(db, 'schools', schoolId, 'examschedule');
+    unsubscibers.push(
+      onSnapshot(examSchedColRef, (snap) => {
+        const list: ExamScheduleItem[] = [];
+        snap.forEach(d => list.push({ id: d.id, ...d.data() } as ExamScheduleItem));
+        setExamSchedules(list);
+      }, (err) => console.warn("Failed fetching exam schedules", err))
+    );
+
     return () => unsubscibers.forEach(unsub => unsub());
   }, [schoolId]);
 
@@ -294,6 +314,74 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
     return s ? (s.designation || '').toLowerCase() : '';
   };
 
+  // Dynamic Month Wise Ledger Helpers
+  const monthToDatePrefix = (m: string) => {
+    const parts = m.split(' ');
+    if (parts.length < 2) return '2026-05';
+    const monthName = parts[0];
+    const year = parts[1];
+    const monthsMap: { [key: string]: string } = {
+      'January': '01', 'February': '02', 'March': '03', 'April': '04',
+      'May': '05', 'June': '06', 'July': '07', 'August': '08',
+      'September': '09', 'October': '10', 'November': '11', 'December': '12'
+    };
+    return `${year}-${monthsMap[monthName] || '05'}`;
+  };
+
+  const getMonthlyFeeCollection = (targetMonth: string) => {
+    return fees
+      .filter(f => f.month === targetMonth)
+      .reduce((sum, item) => sum + (item.paid || 0), 0);
+  };
+
+  const getMonthlySalariesPaid = (targetMonth: string) => {
+    return payroll
+      .filter(p => p.month === targetMonth && p.status === 'Paid')
+      .reduce((sum, item) => sum + (item.net || item.basic || 0), 0);
+  };
+
+  const getMonthlyTeacherSalariesPaid = (targetMonth: string) => {
+    return payroll
+      .filter(p => p.month === targetMonth && p.status === 'Paid' && (isTeacher(p.staffId)))
+      .reduce((sum, item) => sum + (item.net || item.basic || 0), 0);
+  };
+
+  const isTeacher = (staffId: string) => {
+    const s = staff.find(itm => itm.id === staffId);
+    return s && (s.role === 'Teacher' || (s.role || '').toLowerCase().includes('teach'));
+  };
+
+  const getMonthlyExpenses = (targetMonth: string) => {
+    const prefix = monthToDatePrefix(targetMonth);
+    return expenses
+      .filter(e => e.date?.startsWith(prefix))
+      .reduce((sum, item) => sum + (item.amount || 0), 0);
+  };
+
+  const getMonthlyNetSavings = (targetMonth: string) => {
+    const feeCol = getMonthlyFeeCollection(targetMonth);
+    const payCol = getMonthlySalariesPaid(targetMonth);
+    const expCol = getMonthlyExpenses(targetMonth);
+    return feeCol - (payCol + expCol);
+  };
+
+  const getTodaysAttendancePercent = () => {
+    if (!attendance || attendance.length === 0) return '94.3%';
+    const sorted = [...attendance].sort((a, b) => b.date.localeCompare(a.date));
+    const latestDate = sorted[0].date;
+    const activeOnLatestDate = attendance.filter(a => a.date === latestDate);
+    let totalStudents = 0;
+    let presentStudents = 0;
+    activeOnLatestDate.forEach(a => {
+      if (a.records) {
+        totalStudents += a.records.length;
+        presentStudents += a.records.filter(r => r.status === 'P' || r.status === 'L').length;
+      }
+    });
+    if (totalStudents === 0) return '94.3%';
+    return `${Math.round((presentStudents / totalStudents) * 100)}%`;
+  };
+
   // Student Fee earnings for May 2026
   const feeEarningsMay26 = totalCollectedCurrentMonth;
 
@@ -349,6 +437,44 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
 
   const totalPayrollMay26 = teacherSalariesMay26 + guardSalariesMay26 + peonSalariesMay26 + otherSalariesMay26;
   const netProfitLossMay26 = feeEarningsMay26 - (totalSchoolExpensesMay26 + totalPayrollMay26);
+
+  // Dynamic variables for selected month
+  const activeSelectedFeeEarnings = getMonthlyFeeCollection(ledgerSelectedMonth);
+  const activeSelectedExpenses = getMonthlyExpenses(ledgerSelectedMonth);
+  const activeSelectedSalaries = getMonthlySalariesPaid(ledgerSelectedMonth);
+  const activeSelectedNetSavings = activeSelectedFeeEarnings - (activeSelectedExpenses + activeSelectedSalaries);
+  
+  // Specific breakdown
+  const prefixSelected = monthToDatePrefix(ledgerSelectedMonth);
+  const activeSelectedElectricity = expenses
+    .filter(e => e.date?.startsWith(prefixSelected) && (
+      (e.category || '').toLowerCase().includes('electricity') ||
+      (e.category || '').toLowerCase().includes('bill') ||
+      (e.category || '').toLowerCase().includes('utility') ||
+      (e.description || '').toLowerCase().includes('bill') ||
+      (e.description || '').toLowerCase().includes('electricity')
+    ))
+    .reduce((sum, item) => sum + (item.amount || 0), 0);
+  
+  const activeSelectedOtherExpenses = Math.max(0, activeSelectedExpenses - activeSelectedElectricity);
+  
+  const activeSelectedTeacherSalaries = payroll
+    .filter(p => p.month === ledgerSelectedMonth && p.status === 'Paid' && (
+      getStaffRole(p.staffId).includes('teacher') || isTeacher(p.staffId)
+    ))
+    .reduce((sum, item) => sum + (item.net || item.basic || 0), 0);
+
+  const activeSelectedGuardSalaries = payroll
+    .filter(p => p.month === ledgerSelectedMonth && p.status === 'Paid' && getStaffRole(p.staffId).includes('guard'))
+    .reduce((sum, item) => sum + (item.net || item.basic || 0), 0);
+
+  const activeSelectedPeonSalaries = payroll
+    .filter(p => p.month === ledgerSelectedMonth && p.status === 'Paid' && (
+      getStaffRole(p.staffId).includes('peon') || getStaffRole(p.staffId).includes('naib qasid') || getStaffRole(p.staffId).includes('helper')
+    ))
+    .reduce((sum, item) => sum + (item.net || item.basic || 0), 0);
+
+  const activeSelectedOtherSalaries = Math.max(0, activeSelectedSalaries - (activeSelectedTeacherSalaries + activeSelectedGuardSalaries + activeSelectedPeonSalaries));
 
   // Recent Activity logger logs basic system stats changes
   const recentActivities = [
@@ -733,6 +859,79 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
     }
   };
 
+  // EXAMS SCHEDULE MANAGEMENT
+  const handleOpenExamScheduleModal = (item?: ExamScheduleItem | null) => {
+    if (item) {
+      setExamScheduleForm({
+        examName: item.examName,
+        class: item.class,
+        subject: item.subject,
+        date: item.date,
+        startTime: item.startTime,
+        endTime: item.endTime,
+        totalMarks: item.totalMarks,
+        roomNo: item.roomNo
+      });
+      setExamScheduleModal({ open: true, editItem: item });
+    } else {
+      setExamScheduleForm({
+        examName: 'Final Exams 2026',
+        class: 'Class 1',
+        subject: 'English',
+        date: '2026-06-05',
+        startTime: '09:00',
+        endTime: '12:00',
+        totalMarks: 100,
+        roomNo: 'Room A'
+      });
+      setExamScheduleModal({ open: true, editItem: null });
+    }
+  };
+
+  const handleSaveExamSchedule = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!examScheduleForm.examName || !examScheduleForm.subject || !examScheduleForm.date) {
+      triggerToast('برائے مہربانی تمام نشان زدہ فیلڈز پُر کریں / Please fill the required fields.', 'error');
+      return;
+    }
+
+    try {
+      if (examScheduleModal.editItem) {
+        // Edit existing
+        const docRef = doc(db, 'schools', schoolId, 'examschedule', examScheduleModal.editItem.id);
+        const updatedObj: ExamScheduleItem = {
+          id: examScheduleModal.editItem.id,
+          ...examScheduleForm
+        };
+        await setDoc(docRef, updatedObj, { merge: true });
+        triggerToast('سلسلہ شیڈول کامیابی سے تبدیل کیا گیا / Exam schedule successfully updated.');
+      } else {
+        // Create new
+        const docId = `exsch_${Date.now()}`;
+        const newDocRef = doc(db, 'schools', schoolId, 'examschedule', docId);
+        const newObj: ExamScheduleItem = {
+          id: docId,
+          ...examScheduleForm
+        };
+        await setDoc(newDocRef, newObj);
+        triggerToast('نیا امتحان کامیابی سے شیڈول کیا گیا / Exam successfully scheduled.');
+      }
+      setExamScheduleModal({ open: false });
+    } catch (err) {
+      handleFirestoreError(err, OperationType.WRITE, `schools/${schoolId}/examschedule`);
+    }
+  };
+
+  const handleDeleteExamSchedule = async (scheduleId: string) => {
+    if (!confirm(t('confirmDelete'))) return;
+    try {
+      await deleteDoc(doc(db, 'schools', schoolId, 'examschedule', scheduleId));
+      triggerToast('شیڈول کامیابی سے حذف کیا گیا / Exam schedule deleted.');
+    } catch (err) {
+      handleFirestoreError(err, OperationType.DELETE, `schools/${schoolId}/examschedule/${scheduleId}`);
+    }
+  };
+
   // PROXIED GEMINI AI REPORTS
   const handleGenerateAIReport = async () => {
     let datasetContext: any = {};
@@ -1006,10 +1205,10 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
               { id: 'attendance', label: t('attendance'), icon: Calendar },
               { id: 'fees', label: t('feesTab'), icon: DollarSign },
               { id: 'results', label: t('results'), icon: Award },
+              { id: 'exams_schedule', label: currentLang === 'ur' ? 'امتحانی شیڈول / شیڈول' : 'امتحانی شیڈول / Exam Schedule', icon: Calendar },
               { id: 'staff', label: t('staff'), icon: Users },
               { id: 'payroll', label: t('payroll'), icon: DollarSign },
               { id: 'expenses', label: t('expenses'), icon: BookOpen },
-              { id: 'reports', label: t('reports'), icon: Sparkles },
               { id: 'settings', label: t('settings'), icon: Settings },
               { id: 'complaints', label: currentLang === 'ur' ? 'شکایات اور مدد' : 'Complaints & Support', icon: MessageSquare }
             ].map(m => {
@@ -1098,7 +1297,7 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
                   <div className="bg-white p-6 rounded-2xl shadow-sm border border-slate-200/60 flex items-center justify-between">
                     <div>
                       <span className="text-xs font-bold text-slate-500 block mb-1">{t('todaysAttendance')}</span>
-                      <span className="text-2xl font-black text-[#0f1b3d] font-sans">94.3%</span>
+                      <span className="text-2xl font-black text-[#0f1b3d] font-sans">{getTodaysAttendancePercent()}</span>
                     </div>
                     <div className="w-12 h-12 rounded-xl bg-emerald-50 text-emerald-800 flex items-center justify-center"><CheckCircle className="h-6 w-6" /></div>
                   </div>
@@ -1124,15 +1323,32 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
                 <div className="bg-white rounded-2xl border border-slate-200/80 shadow-sm p-6 space-y-6" id="dashboard-financial-ledger">
                   <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 border-b pb-4">
                     <div className="space-y-1 text-right sm:text-left">
-                      <h3 className="font-extrabold text-[#0f1b3d] text-base">رواں ماہ کا مالیاتی حساب کتاب / School Financial Ledger</h3>
-                      <p className="text-xs text-slate-400">رواں مہینے کے اخراجات بقایا فیس اور ملازمین کی تنخواہیں</p>
+                      <h3 className="font-extrabold text-[#0f1b3d] text-base flex items-center gap-2">
+                        <span>مالیاتی حساب کتاب / Monthly Financial Ledger</span>
+                        <span className="text-[11px] px-2 py-0.5 bg-emerald-50 text-emerald-700 rounded-md border font-normal border-emerald-100 font-sans tracking-wide">Bilingual</span>
+                      </h3>
+                      <p className="text-xs text-slate-400">مہینہ منتخب کریں اور طالب علموں کی فیس، اساتذہ کی تنخواہیں اور کُل مالی بچت لائیو دیکھیں</p>
                     </div>
-                    
-                    <div className="text-right">
-                      <span className="text-xs font-bold text-slate-500 block">خالص بچت / Net Savings</span>
-                      <span className={`text-lg font-black font-sans px-3.5 py-1.5 rounded-xl border inline-block ${netProfitLossMay26 >= 0 ? 'bg-green-50 text-emerald-800 border-green-200' : 'bg-red-50 text-rose-805 border-red-200'}`}>
-                        PKR {netProfitLossMay26.toLocaleString()}
-                      </span>
+
+                    <div className="flex flex-wrap items-center gap-3">
+                      <div>
+                        <select 
+                          value={ledgerSelectedMonth} 
+                          onChange={(e) => setLedgerSelectedMonth(e.target.value)}
+                          className="bg-slate-50 border border-slate-200 hover:border-slate-300 font-extrabold text-xs shadow-xs rounded-xl py-2 px-3 text-slate-800 outline-none cursor-pointer font-sans transition-all"
+                        >
+                          {["January 2026", "February 2026", "March 2026", "April 2026", "May 2026", "June 2026", "July 2026", "August 2026", "September 2026", "October 2026", "November 2026", "December 2026"].map(mon => (
+                            <option key={mon} value={mon}>{mon}</option>
+                          ))}
+                        </select>
+                      </div>
+
+                      <div className="text-right">
+                        <span className="text-[10px] font-bold text-slate-400 block mb-0.5">خالص بچت / Net Savings</span>
+                        <span className={`text-sm font-black font-sans px-3 py-1.5 rounded-xl border inline-block ${activeSelectedNetSavings >= 0 ? 'bg-green-50 text-emerald-800 border-green-200' : 'bg-red-50 text-rose-800 border-red-200'}`}>
+                          PKR {activeSelectedNetSavings.toLocaleString()}
+                        </span>
+                      </div>
                     </div>
                   </div>
 
@@ -1145,14 +1361,14 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
                       </div>
                       
                       <div className="space-y-1">
-                        <span className="text-[10px] text-slate-400 block">طالب علموں سے حاصل شدہ کُل فیس (Students Earnings)</span>
-                        <span className="text-2xl font-black text-indigo-950 font-sans block">PKR {feeEarningsMay26.toLocaleString()}</span>
+                        <span className="text-[10px] text-slate-400 block">{ledgerSelectedMonth} میں موصول شدہ کُل فیس (Students Earnings)</span>
+                        <span className="text-2xl font-black text-indigo-950 font-sans block">PKR {activeSelectedFeeEarnings.toLocaleString()}</span>
                       </div>
 
-                      <div className="pt-2 text-xs text-slate-500 font-sans space-y-1 border-t border-dashed">
+                      <div className="pt-2 text-xs text-slate-500 font-sans space-y-1 border-t border-dashed border-indigo-100/50">
                         <div className="flex justify-between">
                           <span>طالب علموں کی تعداد:</span>
-                          <span className="font-bold">{totalStudentsCount}</span>
+                          <span className="font-bold">{students.length} Total</span>
                         </div>
                       </div>
                     </div>
@@ -1160,23 +1376,23 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
                     {/* School Expenses Card */}
                     <div className="bg-[#fff5f5]/70 border border-rose-100/50 rounded-2xl p-5 space-y-3">
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-rose-900 bg-rose-50 border  border-rose-200 px-2 py-0.5 rounded-md">اخراجات / Expenses</span>
+                        <span className="text-xs font-bold text-rose-900 bg-rose-50 border border-rose-200 px-2 py-0.5 rounded-md">اخراجات / Expenses</span>
                         <FileText className="h-4 w-4 text-rose-600" />
                       </div>
                       
                       <div className="space-y-1">
-                        <span className="text-[10px] text-slate-400 block">اسکول کے بلز اور دیگر اخراجات (Electricity Bills & Misc)</span>
-                        <span className="text-2xl font-black text-rose-800 font-sans block">PKR {totalSchoolExpensesMay26.toLocaleString()}</span>
+                        <span className="text-[10px] text-slate-400 block">{ledgerSelectedMonth} کے کُل اخراجات (Electricity & Misc)</span>
+                        <span className="text-2xl font-black text-rose-800 font-sans block">PKR {activeSelectedExpenses.toLocaleString()}</span>
                       </div>
 
-                      <div className="pt-2 text-xs text-slate-500 font-sans space-y-2 border-t border-dashed border-rose-100">
+                      <div className="pt-2 text-xs text-slate-500 font-sans space-y-2 border-t border-dashed border-rose-100/50">
                         <div className="flex justify-between">
                           <span>بجلی کا بل (Electricity Utility):</span>
-                          <span className="font-bold font-sans text-rose-700">PKR {electricityExpensesMay26.toLocaleString()}</span>
+                          <span className="font-bold font-sans text-rose-700">PKR {activeSelectedElectricity.toLocaleString()}</span>
                         </div>
                         <div className="flex justify-between">
                           <span>متفرق اخراجات (Other School Exp):</span>
-                          <span className="font-bold font-sans text-rose-700">PKR {otherExpensesMay26.toLocaleString()}</span>
+                          <span className="font-bold font-sans text-rose-700">PKR {activeSelectedOtherExpenses.toLocaleString()}</span>
                         </div>
                       </div>
                     </div>
@@ -1184,37 +1400,36 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
                     {/* Employee Salaries Card */}
                     <div className="bg-[#f0fdf4]/70 border border-green-150/50 rounded-2xl p-5 space-y-3">
                       <div className="flex items-center justify-between">
-                        <span className="text-xs font-bold text-emerald-900 bg-green-50 border border-green-200 px-2 py-0.5 rounded-md">ملازمین تنخواہیں / Payroll</span>
+                        <span className="text-xs font-bold text-emerald-950 bg-green-50 border border-green-200 px-2 py-0.5 rounded-md">ملازمین تنخواہیں / Payroll</span>
                         <Users className="h-4 w-4 text-emerald-600" />
                       </div>
                       
                       <div className="space-y-1">
-                        <span className="text-[10px] text-slate-400 block">ملازمین و اساتذہ کی کُل ادا شدہ تنخواہیں (Paid Salaries)</span>
-                        <span className="text-2xl font-black text-emerald-850 font-sans block">PKR {totalPayrollMay26.toLocaleString()}</span>
+                        <span className="text-[10px] text-slate-400 block">{ledgerSelectedMonth} میں ادا شدہ اور جاری شدہ تنخواہیں (Staff Payroll)</span>
+                        <span className="text-2xl font-black text-emerald-850 font-sans block">PKR {activeSelectedSalaries.toLocaleString()}</span>
                       </div>
 
-                      <div className="pt-2 text-xs text-slate-500 font-sans space-y-1.5 border-t border-dashed border-green-100">
+                      <div className="pt-2 text-xs text-slate-500 font-sans space-y-1.5 border-t border-dashed border-green-150/50">
                         <div className="flex justify-between">
-                          <span>اساتذہ (Teachers Salary):</span>
-                          <span className="font-bold font-sans text-emerald-800">PKR {teacherSalariesMay26.toLocaleString()}</span>
+                          <span className="font-semibold text-emerald-900">اساتذہ (Teachers Salary Paid):</span>
+                          <span className="font-black font-sans text-emerald-800">PKR {activeSelectedTeacherSalaries.toLocaleString()}</span>
                         </div>
                         <div className="flex justify-between">
-                          <span>چوکیدار کی تنخواہ (Guard Salary):</span>
-                          <span className="font-bold font-sans text-emerald-800">PKR {guardSalariesMay26.toLocaleString()}</span>
+                          <span>چوکیدار تنخواہ (Guard Salary):</span>
+                          <span className="font-semibold font-sans text-slate-700">PKR {activeSelectedGuardSalaries.toLocaleString()}</span>
                         </div>
                         <div className="flex justify-between">
                           <span>نائب قاصد (Peon Salary):</span>
-                          <span className="font-bold font-sans text-emerald-800">PKR {peonSalariesMay26.toLocaleString()}</span>
+                          <span className="font-semibold font-sans text-slate-700">PKR {activeSelectedPeonSalaries.toLocaleString()}</span>
                         </div>
-                        {otherSalariesMay26 > 0 && (
+                        {activeSelectedOtherSalaries > 0 && (
                           <div className="flex justify-between">
                             <span>دیگر سٹاف (Other Staff):</span>
-                            <span className="font-bold font-sans text-emerald-800">PKR {otherSalariesMay26.toLocaleString()}</span>
+                            <span className="font-semibold font-sans text-slate-700">PKR {activeSelectedOtherSalaries.toLocaleString()}</span>
                           </div>
                         )}
                       </div>
                     </div>
-
                   </div>
                 </div>
 
@@ -1272,9 +1487,9 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
                       <UserPlus className="h-6 w-6 text-[#00c896] mx-auto" />
                       <span className="text-xs font-bold block">{t('addStudent')}</span>
                     </button>
-                    <button onClick={() => setActiveModule('reports')} className="p-4 bg-slate-50 hover:bg-[#00c896]/10 hover:border-[#00c896] border border-slate-150 rounded-xl transition text-center space-y-2">
-                      <Sparkles className="h-6 w-6 text-[#00c896] mx-auto" />
-                      <span className="text-xs font-bold block">{t('generateReport')}</span>
+                    <button onClick={() => setActiveModule('results')} className="p-4 bg-slate-50 hover:bg-[#00c896]/10 hover:border-[#00c896] border border-slate-150 rounded-xl transition text-center space-y-2">
+                      <Award className="h-6 w-6 text-[#00c896] mx-auto" />
+                      <span className="text-xs font-bold block">{t('results')}</span>
                     </button>
                   </div>
                 </div>
@@ -1820,97 +2035,147 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
               </div>
             )}
 
-            {/* MODULE 9: AI REPORTS */}
-            {activeModule === 'reports' && (
-              <div className="space-y-6" id="module-reports">
-                <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-slate-500 block">{t('selectReportType')}</label>
-                      <select 
-                        value={aiReportType}
-                        onChange={(e) => setAiReportType(e.target.value)}
-                        className="w-full p-3 bg-slate-50 border border-slate-200 font-bold rounded-xl outline-none text-sm text-slate-800"
-                      >
-                        <option value="Student Performance">{t('studentPerformance')}</option>
-                        <option value="Class Summary">{t('classSummary')}</option>
-                        <option value="Fee Report">{t('feeReport')}</option>
-                        <option value="Attendance Report">{t('attendanceReport')}</option>
-                      </select>
-                    </div>
 
-                    <div className="space-y-1">
-                      <label className="text-xs font-bold text-slate-500 block">{t('selectPeriod')}</label>
-                      <select 
-                        value={aiPeriod}
-                        onChange={(e) => setAiPeriod(e.target.value)}
-                        className="w-full p-3 bg-slate-50 border border-slate-200 font-bold rounded-xl outline-none text-sm text-slate-800"
-                      >
-                        <option value="This Month">{t('thisMonth')}</option>
-                        <option value="Last Month">{t('lastMonth')}</option>
-                        <option value="This Year">{t('thisYear')}</option>
-                      </select>
-                    </div>
+            {/* MODULE: EXAMS SCHEDULE */}
+            {activeModule === 'exams_schedule' && (
+              <div className="space-y-6" id="module-exams-schedule">
+                <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4 bg-white p-6 rounded-2xl border border-slate-200/60 shadow-xs">
+                  <div className="space-y-1 text-right sm:text-left">
+                    <h3 className="font-extrabold text-[#0f1b3d] text-lg flex items-center gap-2">
+                      <span className="w-2.5 h-6 bg-[#00c896] rounded-full inline-block"></span>
+                      <span>امتحانی شیڈولنگ بورڈ / Exam Schedule Board</span>
+                    </h3>
+                    <p className="text-xs text-slate-400">تمام کلاسوں اور پرچوں کے امتحانی نظام الاوقات کو یہاں سے مینیج کریں</p>
                   </div>
-
-                  <div className="pt-2 flex justify-end">
-                    <button 
-                      onClick={handleGenerateAIReport}
-                      disabled={aiGenerating}
-                      className="px-6 py-3 bg-[#0f1b3d] hover:bg-[#00c896] text-[#00c896] hover:text-[#0f1b3d] font-bold rounded-xl text-sm transition shadow-lg flex items-center gap-2 cursor-pointer disabled:opacity-50"
-                    >
-                      <Sparkles className="h-4 w-4 animate-spin-slow" />
-                      <span>{aiGenerating ? t('aiAnalyzing') : t('generateAiReport')}</span>
-                    </button>
-                  </div>
+                  
+                  <button 
+                    onClick={() => {
+                      setExamScheduleForm({
+                        examName: 'Final Exams 2026',
+                        class: 'Class 5',
+                        subject: 'Mathematics',
+                        date: '2026-06-05',
+                        startTime: '09:00',
+                        endTime: '12:00',
+                        totalMarks: 100,
+                        roomNo: 'Room A'
+                      });
+                      setExamScheduleModal({ open: true, editItem: null });
+                    }}
+                    className="w-full sm:w-auto px-5 py-2.5 bg-[#0f1b3d] text-[#00c896] hover:bg-opacity-90 font-extrabold text-xs rounded-xl flex items-center justify-center gap-2 border border-emerald-500/20 shadow-xs transition-colors"
+                  >
+                    <Plus className="h-4 w-4" />
+                    <span>نیا امتحان شیڈول کریں / Create Schedule</span>
+                  </button>
                 </div>
 
-                {/* Displaying AI generated outputs */}
-                {(lastGeneratedReport || savedReports.length > 0) && (
-                  <div className="space-y-6">
-                    <h3 className="font-bold text-slate-700 text-sm">تخلیق شدہ جیمنائی AI رپورٹس (Saved AI Consulting Runs)</h3>
+                {/* Filter and stats */}
+                <div className="bg-white rounded-2xl border border-slate-200/60 p-6 shadow-xs space-y-6">
+                  <div className="grid grid-cols-1 md:grid-cols-4 gap-6 items-center">
+                    <div className="md:col-span-2 relative">
+                      <Search className="absolute right-3.5 top-3.5 h-4 w-4 text-slate-400" />
+                      <input 
+                        type="text" 
+                        placeholder="کلاس، مضمون یا امتحان کے نام سے تلاش کریں... / Search by exam, class, subject..."
+                        value={examSearchQuery}
+                        onChange={(e) => setExamSearchQuery(e.target.value)}
+                        className="w-full text-xs font-semibold pr-10 pl-4 py-3 bg-slate-50 hover:bg-slate-100/50 focus:bg-white border rounded-xl outline-none focus:border-indigo-400 transition-all text-right"
+                      />
+                    </div>
                     
-                    {/* Active report */}
-                    {(lastGeneratedReport || savedReports[0]) && (
-                      <div className="bg-white border rounded-3xl p-6 md:p-8 shadow-sm space-y-6">
-                        <div className="flex justify-between items-center text-sm border-b pb-4">
-                          <div>
-                            <span className="font-black text-slate-800 block">{(lastGeneratedReport || savedReports[0]).reportType} Summary</span>
-                            <span className="text-xs text-slate-400">Created range: {(lastGeneratedReport || savedReports[0]).timePeriod}</span>
-                          </div>
-                          
-                          <button 
-                            type="button"
-                            onClick={() => setActiveAiReportPrint(lastGeneratedReport || savedReports[0])}
-                            className="p-2 border rounded-xl hover:bg-slate-50 text-slate-500"
-                          >
-                            <Printer className="h-4 w-4" />
-                          </button>
-                        </div>
+                    <div className="p-3.5 bg-slate-50 rounded-xl flex justify-between items-center text-xs">
+                      <span className="text-slate-400">کُل شیڈولڈ پیپرز:</span>
+                      <span className="font-extrabold text-[#0f1b3d] font-sans text-sm">{examSchedules.length} Papers</span>
+                    </div>
 
-                        <div className="grid grid-cols-1 md:grid-cols-2 gap-8 text-xs leading-relaxed font-sans">
-                          {/* English column */}
-                          <div className="space-y-4 font-normal text-slate-700">
-                            <h4 className="font-bold text-[#0f1b3d] text-sm">English Intelligence Summary</h4>
-                            <div className="p-4 bg-slate-50 border rounded-xl whitespace-pre-line">
-                              {(lastGeneratedReport || savedReports[0]).englishContent}
-                            </div>
-                          </div>
-
-                          {/* Urdu Column */}
-                          <div className="space-y-4 font-normal text-slate-700 text-right">
-                            <h4 className="font-bold text-[#0f1b3d] text-sm">اردو تجزياتی خلاصہ</h4>
-                            <div className="p-4 bg-slate-50/70 border rounded-xl whitespace-pre-line leading-relaxed">
-                              {(lastGeneratedReport || savedReports[0]).urduContent}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    )}
+                    <div className="p-3.5 bg-slate-50 rounded-xl flex justify-between items-center text-xs">
+                      <span className="text-slate-400">امتحان کا عنوان:</span>
+                      <span className="font-extrabold text-emerald-700 font-sans text-xs">Bilingual Board</span>
+                    </div>
                   </div>
-                )}
+
+                  {/* Listings */}
+                  <div className="overflow-x-auto rounded-xl border border-slate-100">
+                    <table className="w-full text-right text-xs">
+                      <thead>
+                        <tr className="bg-slate-50 text-slate-500 font-bold border-b border-slate-100">
+                          <th className="py-3.5 px-4">امتحان کا نام / Exam</th>
+                          <th className="py-3.5 px-4 text-center">کلاس / Class</th>
+                          <th className="py-3.5 px-4 text-center">پرچہ / Subject</th>
+                          <th className="py-3.5 px-4 text-center">تاریخ / Date</th>
+                          <th className="py-3.5 px-4 text-center">وقت / Timing</th>
+                          <th className="py-3.5 px-4 text-center">روم نمبر / Room</th>
+                          <th className="py-3.5 px-4 text-center">کُل نمبر / Marks</th>
+                          <th className="py-3.5 px-4 text-center">ایکشنز / Actions</th>
+                        </tr>
+                      </thead>
+                      <tbody className="divide-y divide-slate-100">
+                        {examSchedules.filter(item => {
+                          const query = (examSearchQuery || '').toLowerCase();
+                          return (item.examName || '').toLowerCase().includes(query) ||
+                                 (item.class || '').toLowerCase().includes(query) ||
+                                 (item.subject || '').toLowerCase().includes(query);
+                        }).length === 0 ? (
+                          <tr>
+                            <td colSpan={8} className="py-12 text-center text-slate-400 space-y-3">
+                              <Calendar className="h-10 w-10 mx-auto text-slate-300 stroke-1" />
+                              <p className="font-semibold">کوئی امتحانی شیڈول تاحال موجود نہیں ہے</p>
+                              <p className="text-[11px] text-slate-400">نیا شیڈول بنانے کے لیے اوپر موجود بٹن پر کلک کریں</p>
+                            </td>
+                          </tr>
+                        ) : (
+                          examSchedules.filter(item => {
+                            const query = (examSearchQuery || '').toLowerCase();
+                            return (item.examName || '').toLowerCase().includes(query) ||
+                                   (item.class || '').toLowerCase().includes(query) ||
+                                   (item.subject || '').toLowerCase().includes(query);
+                          }).map(sched => (
+                            <tr key={sched.id} className="hover:bg-slate-50/60 font-medium transition-colors">
+                              <td className="py-4 px-4 font-bold text-slate-800">{sched.examName}</td>
+                              <td className="py-4 px-4 text-center"><span className="px-2 py-1 bg-indigo-50 text-indigo-700 rounded-md font-sans font-bold">{sched.class}</span></td>
+                              <td className="py-4 px-4 text-center text-slate-700 font-bold">{sched.subject}</td>
+                              <td className="py-4 px-4 text-center font-sans font-semibold text-slate-600">{sched.date}</td>
+                              <td className="py-4 px-4 text-center font-sans font-semibold text-slate-500">{sched.startTime} - {sched.endTime}</td>
+                              <td className="py-4 px-4 text-center text-slate-600 font-sans font-semibold">{sched.roomNo || 'N/A'}</td>
+                              <td className="py-4 px-4 text-center font-sans font-bold text-emerald-600 font-sans">{sched.totalMarks || 100}</td>
+                              <td className="py-4 px-4">
+                                <div className="flex items-center justify-center gap-1.5">
+                                  <button 
+                                    onClick={() => {
+                                      setExamScheduleForm({
+                                        examName: sched.examName,
+                                        class: sched.class,
+                                        subject: sched.subject,
+                                        date: sched.date,
+                                        startTime: sched.startTime,
+                                        endTime: sched.endTime,
+                                        totalMarks: sched.totalMarks,
+                                        roomNo: sched.roomNo
+                                      });
+                                      setExamScheduleModal({ open: true, editItem: sched });
+                                    }}
+                                    className="p-1 px-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-lg text-[11px] font-bold"
+                                  >
+                                    تبدیل کریں / Edit
+                                  </button>
+                                  <button 
+                                    onClick={() => handleDeleteExamSchedule(sched.id)}
+                                    className="p-1 px-2.5 bg-rose-50 hover:bg-rose-100 text-rose-600 rounded-lg text-[11px] font-bold"
+                                  >
+                                    حذف / Delete
+                                  </button>
+                                </div>
+                              </td>
+                            </tr>
+                          ))
+                        )}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
               </div>
             )}
+
 
             {/* MODULE 10: SETTINGS */}
             {activeModule === 'settings' && (
@@ -2677,56 +2942,130 @@ export default function Dashboard({ schoolId, currentLang, onToggleLang, onLogou
         </div>
       )}
 
-      {/* ==================================================================== */}
-      {/* PRINT DIALOG: AI CONSULTING REPORT PRINT POPUP */}
-      {activeAiReportPrint && (
-        <div className="fixed inset-0 z-50 bg-white md:bg-slate-900/60 overflow-y-auto flex items-center justify-center p-0 md:p-6" id="ai-report-print-overlay">
-          <div className="bg-white max-w-3xl w-full p-8 md:rounded-3xl shadow-2xl relative text-right font-sans border flex flex-col justify-between" id="printable-ai-report-body">
+      {/* EXAM SCHEDULE ADD/EDIT MODAL OVERLAY */}
+      {examScheduleModal.open && (
+        <div className="fixed inset-0 z-50 overflow-y-auto bg-slate-900/60 flex items-center justify-center p-4">
+          <div className="bg-white rounded-3xl max-w-xl w-full p-6 md:p-8 border shadow-2xl relative text-right">
+            <button onClick={() => setExamScheduleModal({ open: false })} className="absolute top-4 left-4 p-1 rounded-full text-slate-400 hover:bg-slate-100">
+              <X className="h-5 w-5" />
+            </button>
+
+            <h3 className="font-bold text-[#0f1b3d] text-base mb-6 text-center">
+              {examScheduleModal.editItem ? 'امتحانی شیڈول تبدیل کریں / Edit Exam Schedule' : 'نیا امتحان شیڈول کریں / Create Exam Schedule'}
+            </h3>
             
-            <div className="flex justify-between items-center pb-4 border-b mb-6 no-print">
-              <button 
-                onClick={() => window.print()}
-                className="px-4 py-2 bg-[#0f1b3d] text-white font-bold text-xs rounded-xl hover:bg-[#00c896] flex items-center gap-1.5"
-              >
-                <Printer className="h-4 w-4" />
-                <span>پرنٹ AI رپورٹ / Print</span>
-              </button>
-              
-              <button onClick={() => setActiveAiReportPrint(null)} className="p-1.5 rounded-full text-slate-400 hover:bg-slate-100">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="space-y-6">
-              <div className="flex justify-between items-center border-b pb-4">
-                <div className="flex items-center space-x-2 space-x-reverse">
-                  <Sparkles className="h-8 w-8 text-[#00c896] animate-pulse" />
-                  <div>
-                    <h2 className="text-lg font-extrabold text-[#0f1b3d]">{profile?.name} - AI Analysis</h2>
-                    <p className="text-[10px] text-slate-400 font-bold">{activeAiReportPrint.reportType} Strategy Document</p>
-                  </div>
+            <form onSubmit={handleSaveExamSchedule} className="space-y-4">
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500 text-right block">امتحان کا نام / Exam Name *</label>
+                  <input 
+                    type="text" 
+                    value={examScheduleForm.examName}
+                    onChange={(e) => setExamScheduleForm(prev => ({ ...prev, examName: e.target.value }))}
+                    className="w-full text-xs font-semibold p-3 bg-slate-50 border rounded-xl outline-none focus:bg-white focus:border-indigo-400 text-right"
+                    placeholder="مثال: Final Exams 2026"
+                    required
+                  />
                 </div>
-                <div className="text-left font-mono text-[10px] text-slate-400">
-                  <span>Generated Range: {activeAiReportPrint.timePeriod}</span>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500 text-right block">کلاس / Class *</label>
+                  <select 
+                    value={examScheduleForm.class}
+                    onChange={(e) => setExamScheduleForm(prev => ({ ...prev, class: e.target.value }))}
+                    className="w-full text-xs font-semibold p-3 bg-slate-50 border rounded-xl outline-none focus:bg-white focus:border-indigo-400 cursor-pointer text-right"
+                    required
+                  >
+                    {['Class 1', 'Class 2', 'Class 3', 'Class 4', 'Class 5', 'Class 6', 'Class 7', 'Class 8', 'Class 9', 'Class 10'].map(cls => (
+                      <option key={cls} value={cls}>{cls}</option>
+                    ))}
+                  </select>
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500 text-right block">مضمون / Subject *</label>
+                  <input 
+                    type="text" 
+                    value={examScheduleForm.subject}
+                    onChange={(e) => setExamScheduleForm(prev => ({ ...prev, subject: e.target.value }))}
+                    className="w-full text-xs font-semibold p-3 bg-slate-50 border rounded-xl outline-none focus:bg-white focus:border-indigo-400 text-right"
+                    placeholder="مثال: Mathematics"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500 text-right block">تاریخ امتحانات / Exam Date *</label>
+                  <input 
+                    type="date" 
+                    value={examScheduleForm.date}
+                    onChange={(e) => setExamScheduleForm(prev => ({ ...prev, date: e.target.value }))}
+                    className="w-full text-xs font-bold font-sans p-3 bg-slate-50 border rounded-xl outline-none focus:bg-white focus:border-indigo-400 text-right"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500 text-right block">شروع وقت / Start Time *</label>
+                  <input 
+                    type="time" 
+                    value={examScheduleForm.startTime}
+                    onChange={(e) => setExamScheduleForm(prev => ({ ...prev, startTime: e.target.value }))}
+                    className="w-full text-xs font-bold font-sans p-3 bg-slate-50 border rounded-xl outline-none focus:bg-white focus:border-indigo-400 text-right"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500 text-right block">ختم وقت / End Time *</label>
+                  <input 
+                    type="time" 
+                    value={examScheduleForm.endTime}
+                    onChange={(e) => setExamScheduleForm(prev => ({ ...prev, endTime: e.target.value }))}
+                    className="w-full text-xs font-bold font-sans p-3 bg-slate-50 border rounded-xl outline-none focus:bg-white focus:border-indigo-400 text-right"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500 text-right block">کُل نمبرات / Total Marks *</label>
+                  <input 
+                    type="number" 
+                    value={examScheduleForm.totalMarks}
+                    onChange={(e) => setExamScheduleForm(prev => ({ ...prev, totalMarks: parseInt(e.target.value) || 100 }))}
+                    className="w-full text-xs font-bold font-sans p-3 bg-slate-50 border rounded-xl outline-none focus:bg-white focus:border-indigo-400 text-right"
+                    required
+                  />
+                </div>
+
+                <div className="space-y-1">
+                  <label className="text-xs font-bold text-slate-500 text-right block">کمرہ نمبر / Room No</label>
+                  <input 
+                    type="text" 
+                    value={examScheduleForm.roomNo}
+                    onChange={(e) => setExamScheduleForm(prev => ({ ...prev, roomNo: e.target.value }))}
+                    className="w-full text-xs font-semibold p-3 bg-slate-50 border rounded-xl outline-none focus:bg-white focus:border-indigo-400 text-right"
+                    placeholder="مثال: Room A"
+                  />
                 </div>
               </div>
 
-              <div className="space-y-6 leading-relaxed text-slate-800 text-xs text-right">
-                <h3 className="font-bold text-[#0f1b3d] text-sm border-b pb-1">اردو تجزياتی سفارشات</h3>
-                <div className="p-4 bg-slate-50 rounded-xl whitespace-pre-line text-xs font-normal">
-                  {activeAiReportPrint.urduContent}
-                </div>
-
-                <h3 className="font-bold text-[#0f1b3d] text-sm border-b pb-1 text-left">English Analytics Summary</h3>
-                <div className="p-4 bg-slate-50 rounded-xl whitespace-pre-line text-xs text-left font-normal">
-                  {activeAiReportPrint.englishContent}
-                </div>
+              <div className="pt-4 flex gap-3 justify-end">
+                <button 
+                  type="button" 
+                  onClick={() => setExamScheduleModal({ open: false })}
+                  className="px-5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-bold text-xs rounded-xl"
+                >
+                  منسوخ کریں / Cancel
+                </button>
+                <button 
+                  type="submit" 
+                  className="px-5 py-2.5 bg-[#0f1b3d] hover:bg-opacity-90 text-[#00c896] font-bold text-xs rounded-xl"
+                >
+                  محفوظ کریں / Save Schedule
+                </button>
               </div>
-            </div>
-
-            <div className="pt-8 text-center text-[10px] text-slate-400">
-              <p>Bilingual AI Consulting reports generated dynamically via EduTrack AI</p>
-            </div>
+            </form>
           </div>
         </div>
       )}
