@@ -6,8 +6,8 @@ import {
 } from 'lucide-react';
 import { Language } from '../types';
 import tayyabPortrait from '../assets/images/tayyab_real_final_beauty.png';
-import tayyabAlt1 from '../assets/images/muhammad_tayyab_1779779674101_1779781067546.png';
-import tayyabAlt2 from '../assets/images/muhammad_tayyab_1779779674101.png';
+import { db } from '../lib/firebase';
+import { doc, onSnapshot } from 'firebase/firestore';
 
 interface AboutUsProps {
   currentLang: Language;
@@ -17,41 +17,63 @@ interface AboutUsProps {
 export default function AboutUs({ currentLang, onBack }: AboutUsProps) {
   const isRTL = currentLang === 'ur';
 
-  const basePrefix = import.meta.env.BASE_URL || './';
-  const cleanBase = basePrefix.endsWith('/') ? basePrefix : basePrefix + '/';
+  const [customAvatar, setCustomAvatar] = React.useState<string | null>(null);
 
-  // Resolves the image path correctly, taking GitHub Pages subpaths into account.
-  const resolveImagePath = (filename: string) => {
-    const cleanFilename = filename.startsWith('/') ? filename.slice(1) : filename;
-    try {
-      const hostname = window.location.hostname;
-      const pathname = window.location.pathname;
-      if (hostname.endsWith('github.io')) {
-        const parts = pathname.split('/').filter(Boolean);
-        if (parts.length > 0) {
-          const repoName = parts[0];
-          return `/${repoName}/${cleanFilename}`;
+  // Sync custom avatar from global settings of super admin
+  React.useEffect(() => {
+    const unsub = onSnapshot(doc(db, 'settings', 'admin'), (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        if (data.avatarUrl) {
+          setCustomAvatar(data.avatarUrl);
         }
       }
-    } catch (e) {}
-    return `/${cleanFilename}`;
+    }, (error) => {
+      console.warn("AboutUs avatar load error:", error);
+    });
+    return () => unsub();
+  }, []);
+
+  // Dynamically constructs the absolute URL at runtime based on the actual page loading context,
+  // which works flawlessly for any host (including GitHub Pages custom domains, subfolders, or local testing).
+  const getAbsoluteImageUrl = (filename: string) => {
+    try {
+      const origin = window.location.origin;
+      let pathname = window.location.pathname;
+      if (pathname.endsWith('.html')) {
+        pathname = pathname.substring(0, pathname.lastIndexOf('/') + 1);
+      }
+      if (!pathname.endsWith('/')) {
+        pathname = pathname + '/';
+      }
+      const cleanFilename = filename.startsWith('/') ? filename.slice(1) : filename;
+      return `${origin}${pathname}${cleanFilename}`;
+    } catch (e) {
+      return `./${filename}`;
+    }
   };
 
+  // Only use the golden-brown beauty portrait as requested ("yeh meri picture ha yehi lagao bas").
+  // We attach a custom version suffix to bypass any stale cached 404 responses in the user's browser for this asset.
   const imageSources = [
-    resolveImagePath('tayyab_real_final_beauty.png') + '?v=beauty5',
-    tayyabPortrait ? `${tayyabPortrait}?v=beauty5` : '',
-    './tayyab_real_final_beauty.png?v=beauty5',
-    'tayyab_real_final_beauty.png?v=beauty5',
-    `${cleanBase}tayyab_real_final_beauty.png?v=beauty5`,
-    resolveImagePath('muhammad_tayyab_1779779674101_1779781067546.png') + '?v=alt1',
-    tayyabAlt1 ? `${tayyabAlt1}?v=alt1` : '',
-    resolveImagePath('muhammad_tayyab_1779779674101.png') + '?v=alt2',
-    tayyabAlt2 ? `${tayyabAlt2}?v=alt2` : '',
+    customAvatar,
+    `${getAbsoluteImageUrl('tayyab_real_final_beauty.png')}?v=golden10`,
+    tayyabPortrait ? `${tayyabPortrait}?v=golden10` : '',
+    `./tayyab_real_final_beauty.png?v=golden10`,
+    `tayyab_real_final_beauty.png?v=golden10`,
   ].filter(Boolean) as string[];
 
-  const [imgSrc, setImgSrc] = React.useState<string>(imageSources[0]);
+  const [imgSrc, setImgSrc] = React.useState<string>(imageSources[0] || '');
   const [attemptIndex, setAttemptIndex] = React.useState<number>(0);
 
+  // Keep imgSrc updated when active dynamic uploader completes
+  React.useEffect(() => {
+    if (customAvatar) {
+      setImgSrc(customAvatar);
+    }
+  }, [customAvatar]);
+
+  // Fallback handler if any compiled asset fails to load
   const handleImgError = () => {
     const nextIndex = attemptIndex + 1;
     if (nextIndex < imageSources.length) {
@@ -154,7 +176,7 @@ export default function AboutUs({ currentLang, onBack }: AboutUsProps) {
               {/* Profile Image with absolute precision matching reference photo coordinates */}
               <div className="relative group mb-2">
                 <div className="absolute -inset-1.5 bg-[#00c896] rounded-3xl blur-md opacity-40 group-hover:opacity-100 transition duration-500" />
-                <div className="relative w-44 h-56 rounded-2xl overflow-hidden border-4 border-white/90 bg-slate-800 shadow-2xl shrink-0">
+                <div className="relative w-44 h-56 rounded-2xl overflow-hidden border-4 border-white/90 bg-slate-800 shadow-2xl shrink-0 group">
                   <img 
                     src={imgSrc}
                     alt="Muhammad Tayyab portrait" 
@@ -253,7 +275,7 @@ export default function AboutUs({ currentLang, onBack }: AboutUsProps) {
 
                 {/* Button Link */}
                 <a 
-                  href="https://seomtayyab-cell.github.io/medicare-project/" 
+                  href="https://tayyabprojects.github.io/medicare-project/" 
                   target="_blank" 
                   referrerPolicy="no-referrer"
                   className="inline-flex items-center gap-1.5 px-5 py-3 bg-[#0f1b3d] text-white hover:bg-[#00c896] hover:text-[#0f1b3d] font-bold text-xs rounded-xl shadow-sm transition duration-300"

@@ -39,5 +39,11 @@ service cloud.firestore {
       allow read: if isSignedIn() && (resource.data.schoolId == request.auth.uid || isAdmin());
       allow update, delete: if isAdmin();
     }
+
+    // 4. Settings Rules
+    match /settings/{settingId} {
+      allow read: if true;
+      allow write: if isSignedIn();
+    }
   }
 }

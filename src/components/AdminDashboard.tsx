@@ -5,11 +5,10 @@ import {
 } from 'firebase/firestore';
 import { Language, SchoolProfile, Complaint } from '../types';
 import tayyabPortrait from '../assets/images/tayyab_real_final_beauty.png';
-import tayyabAlt1 from '../assets/images/muhammad_tayyab_1779779674101_1779781067546.png';
-import tayyabAlt2 from '../assets/images/muhammad_tayyab_1779779674101.png';
 import { 
   GraduationCap, LogOut, Users, MessageSquare, CheckCircle, Clock, 
-  Search, ShieldAlert, Award, Globe, ToggleLeft, ToggleRight, Loader2, Sparkles, AlertTriangle, X
+  Search, ShieldAlert, Award, Globe, ToggleLeft, ToggleRight, Loader2, Sparkles, AlertTriangle, X,
+  Camera, Upload
 } from 'lucide-react';
 
 interface AdminDashboardProps {
@@ -25,46 +24,148 @@ export default function AdminDashboard({ currentLang, onToggleLang, onLogout }: 
   const [searchQuery, setSearchQuery] = useState('');
   const [activeTab, setActiveTab] = useState<'schools' | 'applications' | 'complaints'>('schools');
   
-  const basePrefix = import.meta.env.BASE_URL || './';
-  const cleanBase = basePrefix.endsWith('/') ? basePrefix : basePrefix + '/';
+  const [customAvatar, setCustomAvatar] = useState<string | null>(null);
 
-  // Resolves the image path correctly, taking GitHub Pages subpaths into account.
-  const resolveImagePath = (filename: string) => {
-    const cleanFilename = filename.startsWith('/') ? filename.slice(1) : filename;
-    try {
-      const hostname = window.location.hostname;
-      const pathname = window.location.pathname;
-      if (hostname.endsWith('github.io')) {
-        const parts = pathname.split('/').filter(Boolean);
-        if (parts.length > 0) {
-          const repoName = parts[0];
-          return `/${repoName}/${cleanFilename}`;
+  // Sync custom avatar from global settings
+  useEffect(() => {
+    const unsub = onSnapshot(doc(db, 'settings', 'admin'), (snapshot) => {
+      if (snapshot.exists()) {
+        const data = snapshot.data();
+        if (data.avatarUrl) {
+          setCustomAvatar(data.avatarUrl);
         }
       }
-    } catch (e) {}
-    return `/${cleanFilename}`;
+    }, (error) => {
+      console.warn("Avatar config load error:", error);
+    });
+    return () => unsub();
+  }, []);
+
+  // Dynamically constructs the absolute URL at runtime based on the actual page loading context,
+  // which works flawlessly for any host (including GitHub Pages custom domains, subfolders, or local testing).
+  const getAbsoluteImageUrl = (filename: string) => {
+    try {
+      const origin = window.location.origin;
+      let pathname = window.location.pathname;
+      if (pathname.endsWith('.html')) {
+        pathname = pathname.substring(0, pathname.lastIndexOf('/') + 1);
+      }
+      if (!pathname.endsWith('/')) {
+        pathname = pathname + '/';
+      }
+      const cleanFilename = filename.startsWith('/') ? filename.slice(1) : filename;
+      return `${origin}${pathname}${cleanFilename}`;
+    } catch (e) {
+      return `./${filename}`;
+    }
   };
 
+  // Only use the golden-brown beauty portrait as requested ("yeh meri picture ha yehi lagao bas").
+  // We attach a custom version suffix to bypass any stale cached 404 responses in the user's browser for this asset.
   const imageSources = [
-    resolveImagePath('tayyab_real_final_beauty.png') + '?v=beauty5',
-    tayyabPortrait ? `${tayyabPortrait}?v=beauty5` : '',
-    './tayyab_real_final_beauty.png?v=beauty5',
-    'tayyab_real_final_beauty.png?v=beauty5',
-    `${cleanBase}tayyab_real_final_beauty.png?v=beauty5`,
-    resolveImagePath('muhammad_tayyab_1779779674101_1779781067546.png') + '?v=alt1',
-    tayyabAlt1 ? `${tayyabAlt1}?v=alt1` : '',
-    resolveImagePath('muhammad_tayyab_1779779674101.png') + '?v=alt2',
-    tayyabAlt2 ? `${tayyabAlt2}?v=alt2` : '',
+    customAvatar,
+    `${getAbsoluteImageUrl('tayyab_real_final_beauty.png')}?v=golden10`,
+    tayyabPortrait ? `${tayyabPortrait}?v=golden10` : '',
+    `./tayyab_real_final_beauty.png?v=golden10`,
+    `tayyab_real_final_beauty.png?v=golden10`,
   ].filter(Boolean) as string[];
 
-  const [imgSrc, setImgSrc] = useState<string>(imageSources[0]);
+  const [imgSrc, setImgSrc] = useState<string>(imageSources[0] || '');
   const [attemptIndex, setAttemptIndex] = useState<number>(0);
 
+  // Sync state whenever customAvatar updates successfully in real-time
+  useEffect(() => {
+    if (customAvatar) {
+      setImgSrc(customAvatar);
+    }
+  }, [customAvatar]);
+
+  // Fallback handler if any compiled asset fails to load
   const handleImgError = () => {
     const nextIndex = attemptIndex + 1;
     if (nextIndex < imageSources.length) {
       setImgSrc(imageSources[nextIndex]);
       setAttemptIndex(nextIndex);
+    }
+  };
+
+  const compressAndResizeImage = (file: File): Promise<string> => {
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        const img = new Image();
+        img.src = event.target?.result as string;
+        img.onload = () => {
+          const canvas = document.createElement('canvas');
+          const MAX_WIDTH = 400;
+          const MAX_HEIGHT = 480;
+          let width = img.width;
+          let height = img.height;
+
+          if (width > height) {
+            if (width > MAX_WIDTH) {
+              height *= MAX_WIDTH / width;
+              width = MAX_WIDTH;
+            }
+          } else {
+            if (height > MAX_HEIGHT) {
+              width *= MAX_HEIGHT / height;
+              height = MAX_HEIGHT;
+            }
+          }
+
+          canvas.width = width;
+          canvas.height = height;
+          const ctx = canvas.getContext('2d');
+          if (!ctx) {
+            resolve(event.target?.result as string);
+            return;
+          }
+
+          // Force soft smooth rendering
+          ctx.imageSmoothingEnabled = true;
+          ctx.imageSmoothingQuality = 'high';
+          ctx.drawImage(img, 0, 0, width, height);
+
+          // Quality is set to 0.75 for highly efficient compression (produces a very sharp ~40KB-70KB file)
+          const compressedDataUrl = canvas.toDataURL('image/jpeg', 0.75);
+          resolve(compressedDataUrl);
+        };
+        img.onerror = (err) => reject(err);
+      };
+      reader.onerror = (err) => reject(err);
+      reader.readAsDataURL(file);
+    });
+  };
+
+  const handleAvatarUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    try {
+      // Show loading feedback
+      const loadingAlertUr = 'تصویر پروسیس اور اپ لوڈ کی جا رہی ہے، براہ کرم انتظار کریں...';
+      const loadingAlertEn = 'Processing and uploading image, please wait...';
+      console.log(currentLang === 'ur' ? loadingAlertUr : loadingAlertEn);
+
+      const compressedBase64 = await compressAndResizeImage(file);
+      
+      await setDoc(doc(db, 'settings', 'admin'), { avatarUrl: compressedBase64 }, { merge: true });
+      alert(currentLang === 'ur' ? 'آپ کی تصویر کامیابی سے اپ لوڈ ہو گئی ہے!' : 'Your display picture has been uploaded successfully!');
+    } catch (err) {
+      console.error("Failed to process or upload avatar:", err);
+      alert('Upload failed: ' + String(err));
+    }
+  };
+
+  const handleSaveAvatarUrl = async (url: string) => {
+    if (!url.trim()) return;
+    try {
+      await setDoc(doc(db, 'settings', 'admin'), { avatarUrl: url.trim() }, { merge: true });
+      alert(currentLang === 'ur' ? 'تصویر کا لنک کامیابی سے محفوظ ہو گیا!' : 'Custom image URL saved successfully!');
+    } catch (err) {
+      console.error("Failed to save avatar URL:", err);
+      alert('Save failed: ' + String(err));
     }
   };
   
@@ -299,16 +400,60 @@ export default function AdminDashboard({ currentLang, onToggleLang, onLogout }: 
           <div className="absolute -top-12 -left-12 w-48 h-48 bg-[#00c896]/10 rounded-full blur-[100px] pointer-events-none" />
           <div className="absolute -bottom-12 -right-12 w-48 h-48 bg-rose-500/10 rounded-full blur-[100px] pointer-events-none" />
 
-          <div className="flex items-center gap-5 relative z-10 flex-col sm:flex-row text-center sm:text-right">
-            <div className="relative shrink-0">
-              <div className="absolute -inset-1 bg-[#00c896] rounded-2xl blur opacity-30" />
-              <img 
-                src={imgSrc} 
-                alt="Muhammad Tayyab Headshot" 
-                className="relative w-20 h-24 object-cover rounded-xl border-2 border-white/90 shadow-lg"
-                referrerPolicy="no-referrer"
-                onError={handleImgError}
-              />
+          <div className="flex items-center gap-6 relative z-10 flex-col md:flex-row text-center md:text-right">
+            <div className="relative shrink-0 flex flex-col items-center gap-3">
+              <div className="relative h-24 w-20">
+                <div className="absolute -inset-1.5 bg-[#00c896] rounded-2xl blur opacity-30 animate-pulse" />
+                <div className="relative overflow-hidden rounded-xl border-2 border-white/95 shadow-lg h-24 w-20">
+                  <img 
+                    src={imgSrc} 
+                    alt="Muhammad Tayyab Headshot" 
+                    className="w-full h-full object-cover"
+                    referrerPolicy="no-referrer"
+                    onError={handleImgError}
+                  />
+                  {/* Subtle camera icon on the corner of the slot */}
+                  <div className="absolute bottom-1 right-1 bg-[#0f1b3d] border border-white/20 p-1 rounded-lg text-[#00c896]">
+                    <Camera className="h-3 w-3" />
+                  </div>
+                </div>
+              </div>
+              
+              {/* Responsive explicit file upload control and url-paster */}
+              <div className="flex flex-col gap-2 w-full max-w-[170px]">
+                <label 
+                  htmlFor="admin-avatar-upload" 
+                  className="py-1.5 px-3 bg-[#00c896] hover:bg-[#00b284] text-[#0f1b3d] rounded-xl text-[11px] font-black tracking-wide text-center cursor-pointer transition shadow-md flex items-center justify-center gap-1.5 uppercase"
+                >
+                  <Upload className="h-3.5 w-3.5" />
+                  <span>{currentLang === 'ur' ? 'تصویر اپ لوڈ کریں' : 'Upload Photo'}</span>
+                </label>
+                <input 
+                  id="admin-avatar-upload"
+                  type="file" 
+                  accept="image/*"
+                  className="hidden" 
+                  onChange={handleAvatarUpload}
+                />
+                
+                <button 
+                  type="button"
+                  onClick={() => {
+                    const url = prompt(
+                      currentLang === 'ur' 
+                        ? 'اپنی تصویر کا لنک (URL) یہاں درج کریں:' 
+                        : 'Paste your custom image URL here:', 
+                      imgSrc.startsWith('data:') ? '' : imgSrc
+                    );
+                    if (url !== null && url.trim() !== '') {
+                      handleSaveAvatarUrl(url);
+                    }
+                  }}
+                  className="py-1 px-3 border border-slate-400 hover:border-white text-slate-300 hover:text-white rounded-xl text-[10px] font-bold cursor-pointer transition text-center flex items-center justify-center gap-1"
+                >
+                  <span>{currentLang === 'ur' ? 'تصویر کا لنک (URL)' : 'Paste Image URL'}</span>
+                </button>
+              </div>
             </div>
             <div>
               <div className="inline-flex items-center gap-1 bg-[#00c896]/10 text-[#00c896] px-3 py-1 rounded-full text-[10px] font-bold font-mono uppercase mb-2">
@@ -330,12 +475,12 @@ export default function AdminDashboard({ currentLang, onToggleLang, onLogout }: 
               <p className="text-[10px] text-[#00c896] font-bold uppercase tracking-wider">Previous Masterpiece</p>
               <h4 className="text-sm font-bold text-white mt-1">MediCare Plus hospital app</h4>
               <a 
-                href="https://seomtayyab-cell.github.io/medicare-project/" 
+                href="https://tayyabprojects.github.io/medicare-project/" 
                 target="_blank" 
                 referrerPolicy="no-referrer"
                 className="text-slate-300 hover:text-[#00c896] text-xs font-mono font-bold flex items-center gap-1.5 mt-2 justify-center sm:justify-start"
               >
-                <span>seomtayyab-cell.github.io</span>
+                <span>tayyabprojects.github.io</span>
                 <span className="text-[10px] bg-slate-800 text-slate-300 px-1.5 rounded-md">Live Link</span>
               </a>
             </div>
